@@ -140,7 +140,7 @@ export async function generateAndSaveDiagnosticBriefing() {
   const userPrompt = `Analyse the following JSON biometric & cross-domain telemetry snapshot for HenryBioOS (${periodStart} to ${latestDay}) and produce the diagnostic protocol briefing:\n\n${JSON.stringify(metricsSnapshot, null, 2)}`;
 
   let summaryMarkdown = '';
-  const modelsToTry = ['gemini-2.5-pro', 'gemini-2.5-flash'];
+  const modelsToTry = ['gemini-2.5-pro', 'gemini-flash-latest'];
   let lastError: unknown = null;
 
   for (const model of modelsToTry) {

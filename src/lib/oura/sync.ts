@@ -740,13 +740,13 @@ export async function upsertOuraRecords(
         records
           .filter(
             (r) =>
-              typeof r.timestamp_unix === 'number' &&
+              (typeof r.timestamp_unix === 'number' || (typeof r.timestamp === 'string' && !Number.isNaN(Date.parse(r.timestamp)))) &&
               typeof r.source === 'string' &&
               typeof r.timestamp === 'string' &&
               typeof r.bpm === 'number',
           )
           .map((r) => ({
-            timestampUnix: r.timestamp_unix as number,
+            timestampUnix: typeof r.timestamp_unix === 'number' ? r.timestamp_unix : Date.parse(r.timestamp as string),
             source: r.source as string,
             timestamp: r.timestamp as string,
             bpm: Math.round(r.bpm as number),
@@ -779,12 +779,12 @@ export async function upsertOuraRecords(
         records
           .filter(
             (r) =>
-              typeof r.timestamp_unix === 'number' &&
+              (typeof r.timestamp_unix === 'number' || (typeof r.timestamp === 'string' && !Number.isNaN(Date.parse(r.timestamp)))) &&
               typeof r.timestamp === 'string' &&
               typeof r.level === 'number',
           )
           .map((r) => ({
-            timestampUnix: r.timestamp_unix as number,
+            timestampUnix: typeof r.timestamp_unix === 'number' ? r.timestamp_unix : Date.parse(r.timestamp as string),
             timestamp: r.timestamp as string,
             level: Math.round(r.level as number),
             charging: asBoolean(r.charging),
