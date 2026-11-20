@@ -465,3 +465,10 @@ export const aiBriefings = pgTable(
   },
   (table) => [index('idx_ai_briefings_created_at').on(table.createdAt)],
 );
+
+// Alert cooldown persistence across serverless cold starts
+export const alertCooldowns = pgTable('alert_cooldowns', {
+  alertKey: text('alert_key').primaryKey(),
+  lastSentAt: timestamp('last_sent_at', { withTimezone: true }).notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
