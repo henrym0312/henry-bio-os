@@ -1,5 +1,5 @@
 export const OURA_API_BASE = 'https://api.ouraring.com';
-export const OURA_AUTHORIZE_URL = 'https://cloud.ouraring.com/oauth/authorize';
+export const OURA_AUTHORIZE_URL = 'https://developer.ouraring.com/authorize';
 export const OURA_TOKEN_URL = 'https://api.ouraring.com/oauth/token';
 export const OURA_USER_AGENT = 'HenryBioOS/1.0';
 
