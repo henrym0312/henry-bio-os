@@ -140,25 +140,40 @@ export async function generateAndSaveDiagnosticBriefing() {
   const userPrompt = `Analyse the following JSON biometric & cross-domain telemetry snapshot for HenryBioOS (${periodStart} to ${latestDay}) and produce the diagnostic protocol briefing:\n\n${JSON.stringify(metricsSnapshot, null, 2)}`;
 
   let summaryMarkdown = '';
-  const modelsToTry = ['gemini-2.5-pro', 'gemini-flash-latest'];
+  const modelsToTry = ['gemini-flash-latest', 'gemini-flash-lite-latest'];
   let lastError: unknown = null;
 
   for (const model of modelsToTry) {
-    try {
-      const response = await ai.models.generateContent({
-        model,
-        contents: userPrompt,
-        config: {
-          systemInstruction: SYSTEM_PROMPT,
-          temperature: 0.2,
-        },
-      });
-      if (response.text && response.text.trim().length > 0) {
-        summaryMarkdown = response.text.trim();
-        break;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents: userPrompt,
+          config: {
+            systemInstruction: SYSTEM_PROMPT,
+            temperature: 0.2,
+          },
+        });
+        if (response.text && response.text.trim().length > 0) {
+          summaryMarkdown = response.text.trim();
+          break;
+        }
+      } catch (err) {
+        lastError = err;
+        const msg = err instanceof Error ? err.message : String(err);
+        const transient =
+          msg.includes('503') ||
+          msg.includes('UNAVAILABLE') ||
+          msg.includes('429') ||
+          msg.includes('overloaded');
+        if (!transient || attempt === 3) {
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, attempt * 1500));
       }
-    } catch (err) {
-      lastError = err;
+    }
+    if (summaryMarkdown) {
+      break;
     }
   }
 
