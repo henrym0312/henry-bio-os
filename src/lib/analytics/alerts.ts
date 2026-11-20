@@ -67,7 +67,7 @@ export async function evaluateAlerts(): Promise<AlertEvaluationResult> {
 
   // 1. Physiological strain / Z-score drift / low readiness
   const readiness = latestRow?.values['daily_readiness.score'];
-  const flaggedMetrics = anomalies.metrics.filter((m) => m.flagged);
+  const flaggedMetrics = anomalies.metrics.filter((m) => m.isAdverseDeviation);
   if (anomalies.strainAlert || flaggedMetrics.length >= 2) {
     const details = flaggedMetrics
       .map((m) => `${m.label} (z=${m.zScore !== null ? m.zScore.toFixed(2) : 'n/a'})`)
