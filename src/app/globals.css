@@ -1,0 +1,33 @@
+@import "tailwindcss";
+
+:root {
+  --bg-canvas: #0A0A0A;
+  --bg-card: #141416;
+  --bg-elevated: #1C1C1E;
+  --border-hairline: rgba(255, 255, 255, 0.08);
+  --text-primary: #F5F5F7;
+  --text-muted: #8E8E93;
+  --accent-blue: #0A84FF;
+  --status-optimal: #30D158;
+  --status-warning: #FF9F0A;
+  --status-alert: #FF453A;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Inter", "Segoe UI", Roboto, sans-serif;
+  --font-mono: "SF Mono", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+@theme inline {
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+}
+
+body {
+  background-color: var(--bg-canvas);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  -webkit-font-smoothing: antialiased;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
