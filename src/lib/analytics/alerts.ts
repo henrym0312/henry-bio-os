@@ -26,6 +26,96 @@ export interface AlertEvaluationResult {
 
 const COOLDOWN_MS = 4 * 60 * 60 * 1000;
 
+export interface NightlySleepPlan {
+  wakeTime: string;
+  minimumOkayMin: number;
+  recommendedSleepMin: number;
+  recommendedSleepFormatted: string;
+  targetBedtime: string;
+  reminderTime: string;
+  reasons: string[];
+}
+
+function formatMinutesAsHm(totalMin: number): string {
+  const clamped = Math.max(0, Math.round(totalMin));
+  const h = Math.floor(clamped / 60);
+  const m = clamped % 60;
+  return `${h}h ${String(m).padStart(2, '0')}m`;
+}
+
+function subtractMinutesFromWakeTime(wakeHm: string, minutesBack: number): string {
+  const [wh, wm] = wakeHm.split(':').map((n) => Number.parseInt(n, 10));
+  const wakeTotal = (Number.isFinite(wh) ? wh : 7) * 60 + (Number.isFinite(wm) ? wm : 30);
+  let targetTotal = (wakeTotal - Math.round(minutesBack)) % (24 * 60);
+  if (targetTotal < 0) targetTotal += 24 * 60;
+  const hh = String(Math.floor(targetTotal / 60)).padStart(2, '0');
+  const mm = String(targetTotal % 60).padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+
+export function computeNightlySleepPlan(
+  matrix: Awaited<ReturnType<typeof buildDailyTelemetryMatrix>>,
+  strainAlert: boolean,
+  wakeTime = '07:30',
+): NightlySleepPlan {
+  const minimumOkayMin = 420; // 7h00m realistic minimum to function okay
+  const latencyBufferMin = 15;
+  let targetSleepMin = 480; // 8h00m baseline target
+  const reasons: string[] = [];
+
+  const recent7 = matrix.slice(-7);
+  const sleepSamples = recent7
+    .map((r) => r.values['sleep.total_sleep_duration'])
+    .filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+
+  if (sleepSamples.length > 0) {
+    const avg7dSleep =
+      sleepSamples.reduce((acc, v) => acc + v, 0) / sleepSamples.length;
+    if (avg7dSleep < 450) {
+      const deficitBoost = Math.min(30, Math.round((450 - avg7dSleep) * 0.5));
+      targetSleepMin += deficitBoost;
+      reasons.push(
+        `7d sleep avg ${formatMinutesAsHm(avg7dSleep)} (+${deficitBoost}m debt recovery)`,
+      );
+    }
+  }
+
+  const latest = matrix.length > 0 ? matrix[matrix.length - 1] : null;
+  const readiness = latest?.values['daily_readiness.score'];
+  if (strainAlert) {
+    targetSleepMin += 20;
+    reasons.push('30d Z-score strain active (+20m)');
+  } else if (typeof readiness === 'number' && readiness < 70) {
+    targetSleepMin += 15;
+    reasons.push(`Readiness ${Math.round(readiness)} pts (+15m)`);
+  }
+
+  const bedtimeSerum = latest?.values['bedtime_serum_ng_ml'];
+  if (typeof bedtimeSerum === 'number' && bedtimeSerum > 35) {
+    targetSleepMin += 15;
+    reasons.push(`Bedtime serum ${bedtimeSerum.toFixed(1)} ng/mL (+15m)`);
+  }
+
+  const clampedSleepMin = Math.max(minimumOkayMin, Math.min(540, targetSleepMin));
+  const totalInBedMin = clampedSleepMin + latencyBufferMin;
+  const targetBedtime = subtractMinutesFromWakeTime(wakeTime, totalInBedMin);
+  const reminderTime = subtractMinutesFromWakeTime(targetBedtime, 180); // 3 hours prior
+
+  if (reasons.length === 0) {
+    reasons.push('Baseline 8h00m target aligned with current telemetry');
+  }
+
+  return {
+    wakeTime,
+    minimumOkayMin,
+    recommendedSleepMin: clampedSleepMin,
+    recommendedSleepFormatted: formatMinutesAsHm(clampedSleepMin),
+    targetBedtime,
+    reminderTime,
+    reasons,
+  };
+}
+
 async function collectActiveAlerts(now: Date, nowMs: number): Promise<{
   targetDay: string;
   alerts: TriggeredAlert[];
@@ -148,17 +238,50 @@ async function collectActiveAlerts(now: Date, nowMs: number): Promise<{
     });
   }
 
-  return { targetDay, alerts };
+  const sleepPlan = computeNightlySleepPlan(matrix, anomalies.strainAlert, '07:30');
+  const [remH, remM] = sleepPlan.reminderTime.split(':').map((n) => Number.parseInt(n, 10));
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  const reminderMinutes = (Number.isFinite(remH) ? remH : 20) * 60 + (Number.isFinite(remM) ? remM : 0);
+
+  // Trigger 3-hour-prior bedtime reminder once window is reached (within 90m after reminderTime)
+  if (nowMinutes >= reminderMinutes && nowMinutes <= reminderMinutes + 90) {
+    alerts.push({
+      id: `bedtime-prep-${targetDay}`,
+      title: `Bedtime in 3h (${sleepPlan.targetBedtime})`,
+      message: `Target sleep ${sleepPlan.recommendedSleepFormatted} (min okay: ${formatMinutesAsHm(sleepPlan.minimumOkayMin)}) before ${sleepPlan.wakeTime} wake. ${sleepPlan.reasons.join('; ')}.`,
+      severity: 'warning',
+      url: 'https://bio.henrymilner.uk/sleep',
+    });
+  }
+
+  return { targetDay, alerts, sleepPlan };
+}
+
+export async function getSleepAndAlertsOverview(): Promise<{
+  alerts: TriggeredAlert[];
+  sleepPlan: NightlySleepPlan;
+}> {
+  const fallbackPlan: NightlySleepPlan = {
+    wakeTime: '07:30',
+    minimumOkayMin: 420,
+    recommendedSleepMin: 480,
+    recommendedSleepFormatted: '8h 00m',
+    targetBedtime: '23:15',
+    reminderTime: '20:15',
+    reasons: ['Default 8h00m target for 07:30 wake'],
+  };
+  try {
+    const now = new Date();
+    const { alerts, sleepPlan } = await collectActiveAlerts(now, now.getTime());
+    return { alerts, sleepPlan };
+  } catch {
+    return { alerts: [], sleepPlan: fallbackPlan };
+  }
 }
 
 export async function getActiveAlerts(): Promise<TriggeredAlert[]> {
-  try {
-    const now = new Date();
-    const { alerts } = await collectActiveAlerts(now, now.getTime());
-    return alerts;
-  } catch {
-    return [];
-  }
+  const { alerts } = await getSleepAndAlertsOverview();
+  return alerts;
 }
 
 async function canSendAlert(
