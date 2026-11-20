@@ -177,45 +177,6 @@ export default async function CommandOverviewPage() {
         </div>
       </section>
 
-      {/* Nightly Sleep Target & 07:30 Wake Bedtime Planner */}
-      <section className="rounded-xl bg-[#141416] border border-white/[0.08] p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <Moon className="w-4 h-4 text-[#0A84FF]" />
-            <span className="text-xs font-semibold uppercase tracking-wider text-[#F5F5F7]">
-              Nightly Sleep &amp; Bedtime Target
-            </span>
-            <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-[#1C1C1E] border border-white/[0.08] text-[#8E8E93]">
-              Wake {sleepPlan.wakeTime} · Alert {sleepPlan.reminderTime} (-3h)
-            </span>
-          </div>
-          <p className="text-xs text-[#8E8E93]">
-            {sleepPlan.reasons.join(' · ')}
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-4 text-xs font-mono tabular-nums">
-          <div className="px-3 py-2 rounded-lg bg-[#0A0A0A]/70 border border-white/[0.08]">
-            <div className="text-[10px] text-[#8E8E93] uppercase">Realistic Min (&ldquo;Okay&rdquo;)</div>
-            <div className="text-sm font-semibold text-[#F5F5F7] mt-0.5">
-              {Math.floor(sleepPlan.minimumOkayMin / 60)}h {String(sleepPlan.minimumOkayMin % 60).padStart(2, '0')}m
-            </div>
-          </div>
-          <div className="px-3 py-2 rounded-lg bg-[#0A0A0A]/70 border border-[#0A84FF]/30">
-            <div className="text-[10px] text-[#0A84FF] uppercase">Preferred Sleep</div>
-            <div className="text-sm font-semibold text-[#F5F5F7] mt-0.5">
-              {sleepPlan.recommendedSleepFormatted}
-            </div>
-          </div>
-          <div className="px-3 py-2 rounded-lg bg-[#0A0A0A]/70 border border-[#30D158]/30">
-            <div className="text-[10px] text-[#30D158] uppercase">Target Bedtime</div>
-            <div className="text-sm font-semibold text-[#30D158] mt-0.5">
-              {sleepPlan.targetBedtime}
-            </div>
-          </div>
-        </div>
-      </section>
-
       {/* 30-Day Rolling Z-Score Strain / Illness Surveillance Banner */}
       <section
         className={cn(

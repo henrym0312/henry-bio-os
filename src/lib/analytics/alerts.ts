@@ -261,7 +261,7 @@ async function collectActiveAlerts(now: Date, nowMs: number): Promise<{
   const reminderMinutes = (Number.isFinite(remH) ? remH : 20) * 60 + (Number.isFinite(remM) ? remM : 0);
 
   // Trigger 3-hour-prior bedtime reminder once window is reached (within 90m after reminderTime)
-  if (nowMinutes >= reminderMinutes && nowMinutes <= reminderMinutes + 90) {
+  if (nowMinutes >= reminderMinutes && nowMinutes <= reminderMinutes + 180) {
     alerts.push({
       id: `bedtime-prep-${targetDay}`,
       title: `Bedtime in 3h (${sleepPlan.targetBedtime})`,
