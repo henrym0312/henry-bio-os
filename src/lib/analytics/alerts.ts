@@ -1,6 +1,6 @@
-import { desc, gte, sql } from 'drizzle-orm';
+import { desc, eq, gte } from 'drizzle-orm';
 import { getDb } from '@/db';
-import { ouraRingBatteryLevel, syncLogs } from '@/db/schema';
+import { alertCooldowns, ouraRingBatteryLevel, syncLogs } from '@/db/schema';
 import {
   buildDailyTelemetryMatrix,
   computeAnomalyStatusFromMatrix,
@@ -24,24 +24,12 @@ export interface AlertEvaluationResult {
   suppressedByCooldown: number;
 }
 
-const COOLDOWN_MS = 4 * 60 * 60 * 1000; // 4 hours per alert id
-const lastSentMap = new Map<string, number>();
+const COOLDOWN_MS = 4 * 60 * 60 * 1000;
 
-function canSendAlert(id: string, nowMs: number): boolean {
-  const prev = lastSentMap.get(id);
-  if (prev !== undefined && nowMs - prev < COOLDOWN_MS) {
-    return false;
-  }
-  return true;
-}
-
-function markAlertSent(id: string, nowMs: number): void {
-  lastSentMap.set(id, nowMs);
-}
-
-export async function evaluateAlerts(): Promise<AlertEvaluationResult> {
-  const now = new Date();
-  const nowMs = now.getTime();
+async function collectActiveAlerts(now: Date, nowMs: number): Promise<{
+  targetDay: string;
+  alerts: TriggeredAlert[];
+}> {
   const db = getDb();
 
   const [matrix, latestBatteryRows, failedSyncRows] = await Promise.all([
@@ -65,7 +53,6 @@ export async function evaluateAlerts(): Promise<AlertEvaluationResult> {
 
   const alerts: TriggeredAlert[] = [];
 
-  // 1. Physiological strain / Z-score drift / low readiness
   const readiness = latestRow?.values['daily_readiness.score'];
   const flaggedMetrics = anomalies.metrics.filter((m) => m.isAdverseDeviation);
   if (anomalies.strainAlert || flaggedMetrics.length >= 2) {
@@ -89,7 +76,6 @@ export async function evaluateAlerts(): Promise<AlertEvaluationResult> {
     });
   }
 
-  // 2. Bedtime pharmacokinetic serum concentration ceiling
   const bedtimeSerum = latestRow?.values['bedtime_serum_ng_ml'];
   if (typeof bedtimeSerum === 'number' && bedtimeSerum > 35) {
     alerts.push({
@@ -101,7 +87,6 @@ export async function evaluateAlerts(): Promise<AlertEvaluationResult> {
     });
   }
 
-  // 3. Sleep architecture / duration deficit
   const totalSleepMin = latestRow?.values['sleep.total_sleep_duration'];
   const deepSleepMin = latestRow?.values['sleep.deep_sleep_duration'];
   if (typeof totalSleepMin === 'number' && totalSleepMin < 390) {
@@ -122,9 +107,8 @@ export async function evaluateAlerts(): Promise<AlertEvaluationResult> {
     });
   }
 
-  // 4. Evening task backlog accumulation (>= 6 remaining after 18:00 local/UTC)
   const remainingTasks = latestRow?.values['daily_task_metrics.remainingCount'];
-  const hour = now.getUTCHours();
+  const hour = now.getHours();
   if (typeof remainingTasks === 'number' && remainingTasks >= 6 && hour >= 18) {
     alerts.push({
       id: `tasks-backlog-${targetDay}`,
@@ -135,9 +119,13 @@ export async function evaluateAlerts(): Promise<AlertEvaluationResult> {
     });
   }
 
-  // 5. Ring battery low or recent ingest/webhook errors
   const latestBattery = latestBatteryRows[0];
-  if (latestBattery && typeof latestBattery.level === 'number' && latestBattery.level <= 20 && !latestBattery.charging) {
+  if (
+    latestBattery &&
+    typeof latestBattery.level === 'number' &&
+    latestBattery.level <= 20 &&
+    !latestBattery.charging
+  ) {
     alerts.push({
       id: `ring-battery-${targetDay}`,
       title: 'Oura Ring Battery Low',
@@ -160,6 +148,63 @@ export async function evaluateAlerts(): Promise<AlertEvaluationResult> {
     });
   }
 
+  return { targetDay, alerts };
+}
+
+export async function getActiveAlerts(): Promise<TriggeredAlert[]> {
+  try {
+    const now = new Date();
+    const { alerts } = await collectActiveAlerts(now, now.getTime());
+    return alerts;
+  } catch {
+    return [];
+  }
+}
+
+async function canSendAlert(
+  db: ReturnType<typeof getDb>,
+  id: string,
+  nowMs: number,
+): Promise<boolean> {
+  const rows = await db
+    .select({ lastSentAt: alertCooldowns.lastSentAt })
+    .from(alertCooldowns)
+    .where(eq(alertCooldowns.alertKey, id))
+    .limit(1);
+  const prev = rows[0]?.lastSentAt?.getTime();
+  if (prev !== undefined && nowMs - prev < COOLDOWN_MS) {
+    return false;
+  }
+  return true;
+}
+
+async function markAlertSent(
+  db: ReturnType<typeof getDb>,
+  id: string,
+  now: Date,
+): Promise<void> {
+  await db
+    .insert(alertCooldowns)
+    .values({
+      alertKey: id,
+      lastSentAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: alertCooldowns.alertKey,
+      set: {
+        lastSentAt: now,
+        updatedAt: now,
+      },
+    });
+}
+
+export async function evaluateAlerts(): Promise<AlertEvaluationResult> {
+  const now = new Date();
+  const nowMs = now.getTime();
+  const db = getDb();
+  const { targetDay, alerts } = await collectActiveAlerts(now, nowMs);
+
   const topic = process.env.NTFY_TOPIC?.trim();
   const serverUrl = (process.env.NTFY_SERVER_URL?.trim() || 'https://ntfy.sh').replace(/\/+$/, '');
   const token = process.env.NTFY_TOKEN?.trim();
@@ -168,7 +213,7 @@ export async function evaluateAlerts(): Promise<AlertEvaluationResult> {
   let suppressedByCooldown = 0;
 
   for (const alert of alerts) {
-    if (!canSendAlert(alert.id, nowMs)) {
+    if (!(await canSendAlert(db, alert.id, nowMs))) {
       suppressedByCooldown += 1;
       continue;
     }
@@ -178,7 +223,7 @@ export async function evaluateAlerts(): Promise<AlertEvaluationResult> {
         const headers: Record<string, string> = {
           Title: alert.title,
           Priority: alert.severity === 'critical' ? 'urgent' : 'default',
-          Tags: alert.severity === 'critical' ? 'rotating_light,heart_eyes_cat' : 'bar_chart',
+          Tags: alert.severity === 'critical' ? 'rotating_light' : 'bar_chart',
           Click: alert.url,
         };
         if (token) {
@@ -191,18 +236,15 @@ export async function evaluateAlerts(): Promise<AlertEvaluationResult> {
         });
         if (res.ok) {
           dispatched += 1;
-          markAlertSent(alert.id, nowMs);
+          await markAlertSent(db, alert.id, now);
         }
       } catch {
-        // Leave unsent in cooldown map so a transient network error retries next cycle
+        // Retry on next evaluation if delivery fails
       }
     } else {
-      markAlertSent(alert.id, nowMs);
+      await markAlertSent(db, alert.id, now);
     }
   }
-
-  // Keep sql imported to avoid unused warning if needed later
-  void sql;
 
   return {
     evaluatedAt: now.toISOString(),

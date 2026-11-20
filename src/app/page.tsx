@@ -13,6 +13,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { MetricSparklineCard } from '@/components/MetricSparklineCard';
+import { getActiveAlerts } from '@/lib/analytics/alerts';
 import { getCommandOverviewData } from '@/lib/ui/telemetry-queries';
 import { cn, formatDurationSeconds } from '@/lib/utils';
 
@@ -27,7 +28,10 @@ function scoreAccent(score: number | null): string {
 }
 
 export default async function CommandOverviewPage() {
-  const data = await getCommandOverviewData();
+  const [data, activeAlerts] = await Promise.all([
+    getCommandOverviewData(),
+    getActiveAlerts(),
+  ]);
   const { anomalies, kpis, sparklines } = data;
 
   const stressMins =
@@ -86,6 +90,50 @@ export default async function CommandOverviewPage() {
             Open Pipeline Control
           </Link>
         </div>
+      )}
+
+      {/* Active Threshold Alerts Strip */}
+      {activeAlerts.length > 0 && (
+        <section className="rounded-xl bg-[#141416] border border-[#FF9F0A]/35 p-4 space-y-2.5">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wider text-[#FF9F0A] flex items-center gap-1.5">
+              <AlertTriangle className="w-3.5 h-3.5" />
+              Active Threshold Alerts ({activeAlerts.length})
+            </span>
+            <span className="text-[11px] font-mono text-[#8E8E93]">
+              4h push cooldown via ntfy
+            </span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+            {activeAlerts.map((a) => (
+              <Link
+                key={a.id}
+                href={a.url.replace('https://bio.henrymilner.uk', '') || '/'}
+                className={cn(
+                  'rounded-lg p-3 border transition-colors block',
+                  a.severity === 'critical'
+                    ? 'bg-[#FF453A]/10 border-[#FF453A]/40 hover:border-[#FF453A]/70'
+                    : 'bg-[#FF9F0A]/10 border-[#FF9F0A]/30 hover:border-[#FF9F0A]/60',
+                )}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span
+                    className={cn(
+                      'text-xs font-semibold',
+                      a.severity === 'critical' ? 'text-[#FF453A]' : 'text-[#FF9F0A]',
+                    )}
+                  >
+                    {a.title}
+                  </span>
+                  <span className="text-[10px] font-mono uppercase text-[#8E8E93]">
+                    {a.severity}
+                  </span>
+                </div>
+                <p className="text-xs text-[#D1D1D6] mt-1">{a.message}</p>
+              </Link>
+            ))}
+          </div>
+        </section>
       )}
 
       {/* 30-Day Rolling Z-Score Strain / Illness Surveillance Banner */}
@@ -191,7 +239,6 @@ export default async function CommandOverviewPage() {
 
       {/* Primary KPI Grid */}
       <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        {/* Readiness */}
         <div className="rounded-xl bg-[#141416] border border-white/[0.08] p-4">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-[#8E8E93] flex items-center gap-1.5">
@@ -221,7 +268,6 @@ export default async function CommandOverviewPage() {
           </div>
         </div>
 
-        {/* Sleep */}
         <Link
           href="/sleep"
           className="rounded-xl bg-[#141416] border border-white/[0.08] hover:border-[#0A84FF]/40 p-4 transition-colors block"
@@ -254,7 +300,6 @@ export default async function CommandOverviewPage() {
           </div>
         </Link>
 
-        {/* Activity */}
         <div className="rounded-xl bg-[#141416] border border-white/[0.08] p-4">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-[#8E8E93] flex items-center gap-1.5">
@@ -279,7 +324,6 @@ export default async function CommandOverviewPage() {
           </div>
         </div>
 
-        {/* Resilience & Stress Ratio */}
         <div className="rounded-xl bg-[#141416] border border-white/[0.08] p-4">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-[#8E8E93] flex items-center gap-1.5">
@@ -310,7 +354,7 @@ export default async function CommandOverviewPage() {
         </div>
       </section>
 
-      {/* Cross-Domain Secondary Strip: Ring Hardware, Pharmacokinetics, Task Velocity */}
+      {/* Cross-Domain Secondary Strip */}
       <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="rounded-xl bg-[#141416] border border-white/[0.08] p-4 flex items-center justify-between">
           <div>
