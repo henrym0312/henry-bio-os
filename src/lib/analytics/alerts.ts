@@ -116,9 +116,25 @@ export function computeNightlySleepPlan(
   };
 }
 
+function getLondonHourAndMinute(now: Date): { hour: number; minute: number } {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/London',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(now);
+  const hour = Number.parseInt(parts.find((x) => x.type === 'hour')?.value ?? '0', 10);
+  const minute = Number.parseInt(parts.find((x) => x.type === 'minute')?.value ?? '0', 10);
+  return {
+    hour: Number.isFinite(hour) ? hour : now.getUTCHours(),
+    minute: Number.isFinite(minute) ? minute : now.getUTCMinutes(),
+  };
+}
+
 async function collectActiveAlerts(now: Date, nowMs: number): Promise<{
   targetDay: string;
   alerts: TriggeredAlert[];
+  sleepPlan: NightlySleepPlan;
 }> {
   const db = getDb();
 
@@ -198,7 +214,8 @@ async function collectActiveAlerts(now: Date, nowMs: number): Promise<{
   }
 
   const remainingTasks = latestRow?.values['daily_task_metrics.remainingCount'];
-  const hour = now.getHours();
+  const { hour: londonHour, minute: londonMinute } = getLondonHourAndMinute(now);
+  const hour = londonHour;
   if (typeof remainingTasks === 'number' && remainingTasks >= 6 && hour >= 18) {
     alerts.push({
       id: `tasks-backlog-${targetDay}`,
@@ -240,7 +257,7 @@ async function collectActiveAlerts(now: Date, nowMs: number): Promise<{
 
   const sleepPlan = computeNightlySleepPlan(matrix, anomalies.strainAlert, '07:30');
   const [remH, remM] = sleepPlan.reminderTime.split(':').map((n) => Number.parseInt(n, 10));
-  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  const nowMinutes = londonHour * 60 + londonMinute;
   const reminderMinutes = (Number.isFinite(remH) ? remH : 20) * 60 + (Number.isFinite(remM) ? remM : 0);
 
   // Trigger 3-hour-prior bedtime reminder once window is reached (within 90m after reminderTime)
