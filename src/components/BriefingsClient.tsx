@@ -1,6 +1,7 @@
 'use client';
 
 import { Fragment, useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import { ChevronDown, ChevronRight, Loader2, Sparkles } from 'lucide-react';
 import { triggerDiagnosticBriefingAction } from '@/app/actions';
 import { cn } from '@/lib/utils';
@@ -12,6 +13,21 @@ export interface BriefingRow {
   summaryMarkdown: string;
   metricsSnapshot: Record<string, unknown>;
   createdAt: string;
+}
+
+function cleanBriefingText(input: string): string {
+  return input
+    .replace(/\\text\{([^}]*)\}/g, '$1')
+    .replace(/\\mathrm\{([^}]*)\}/g, '$1')
+    .replace(/\\Delta/g, 'Delta')
+    .replace(/\\circ/g, ' deg')
+    .replace(/\\times/g, 'x')
+    .replace(/\\le/g, '<=')
+    .replace(/\\ge/g, '>=')
+    .replace(/\\pm/g, '+/-')
+    .replace(/\\rightarrow/g, '->')
+    .replace(/\$([^$]+)\$/g, '$1')
+    .replace(/\$/g, '');
 }
 
 function renderInlineMarkdown(text: string) {
@@ -39,7 +55,7 @@ function renderInlineMarkdown(text: string) {
 }
 
 function MarkdownDisplay({ markdown }: { markdown: string }) {
-  const lines = markdown.split('\n');
+  const lines = cleanBriefingText(markdown).split('\n');
   return (
     <div className="space-y-2 text-[13px] leading-relaxed text-[#D1D1D6]">
       {lines.map((rawLine, idx) => {
@@ -106,6 +122,7 @@ export function BriefingsClient({
 }: {
   initialBriefings: BriefingRow[];
 }) {
+  const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [openSnapshots, setOpenSnapshots] = useState<Record<number, boolean>>({});
@@ -116,6 +133,8 @@ export function BriefingsClient({
       const res = await triggerDiagnosticBriefingAction();
       if (!res.ok) {
         setErrorMsg(res.error);
+      } else {
+        router.refresh();
       }
     });
   };
