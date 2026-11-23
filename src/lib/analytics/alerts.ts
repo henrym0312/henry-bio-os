@@ -158,7 +158,6 @@ async function collectActiveAlerts(now: Date, nowMs: number): Promise<{
   const anomalies = computeAnomalyStatusFromMatrix(matrix);
 
   const alerts: TriggeredAlert[] = [];
-
   const { hour: londonHour, minute: londonMinute } = getLondonHourAndMinute(now);
 
   const readiness = latestRow?.values['daily_readiness.score'];
