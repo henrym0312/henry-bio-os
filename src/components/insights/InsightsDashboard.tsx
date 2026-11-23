@@ -28,8 +28,8 @@ import {
   formatOutcomeValue,
   getOutcomeLabel,
   pluraliseUnit,
+  selectHighlightCliffs,
   selectHighlightDrivers,
-  type AnalyticsCliffItem,
   type AnalyticsContrastItem,
   type AnalyticsDriverItem,
   type ConfidenceLabel,
@@ -210,35 +210,6 @@ function impactSizeBadgeStyle(label: EffectSizeLabel): string {
 
 function contrastScopeBadge(scope: FeatureScope): string {
   return scope === 'environmental' ? 'Seasonal' : 'Habit';
-}
-
-function selectHighlightCliffs(
-  list: AnalyticsCliffItem[],
-  limit: number,
-  uniqueHabitsOnly: boolean,
-): AnalyticsCliffItem[] {
-  const nonZero = list.filter((c) => Math.abs(c.medianDelta) >= 0.1);
-  const pool = nonZero.length > 0 ? nonZero : list;
-  if (!uniqueHabitsOnly) {
-    return pool.slice(0, limit);
-  }
-  const picked: AnalyticsCliffItem[] = [];
-  const seenFeatures = new Set<string>();
-  for (const item of pool) {
-    if (seenFeatures.has(item.featureKey)) continue;
-    seenFeatures.add(item.featureKey);
-    picked.push(item);
-    if (picked.length >= limit) break;
-  }
-  if (picked.length < limit) {
-    const pickedIds = new Set(picked.map((p) => p.id));
-    for (const item of pool) {
-      if (pickedIds.has(item.id)) continue;
-      picked.push(item);
-      if (picked.length >= limit) break;
-    }
-  }
-  return picked;
 }
 
 function buildTrialDefaults(input: {

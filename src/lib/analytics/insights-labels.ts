@@ -603,13 +603,85 @@ export function selectHighlightDrivers(
   }
 
   const picked: AnalyticsDriverItem[] = [];
+  const pickedIds = new Set<number>();
   const seenFamilies = new Set<string>();
+  const seenFeatures = new Set<string>();
+
   for (const item of ranked) {
-    if (seenFamilies.has(item.dedupeGroup)) continue;
+    if (seenFamilies.has(item.dedupeGroup) || seenFeatures.has(item.featureKey)) continue;
     seenFamilies.add(item.dedupeGroup);
+    seenFeatures.add(item.featureKey);
     picked.push(item);
+    pickedIds.add(item.id);
     if (picked.length >= limit) break;
   }
+
+  if (picked.length < limit) {
+    for (const item of ranked) {
+      if (pickedIds.has(item.id) || seenFeatures.has(item.featureKey)) continue;
+      seenFeatures.add(item.featureKey);
+      picked.push(item);
+      pickedIds.add(item.id);
+      if (picked.length >= limit) break;
+    }
+  }
+
+  if (picked.length < limit) {
+    for (const item of ranked) {
+      if (pickedIds.has(item.id)) continue;
+      picked.push(item);
+      pickedIds.add(item.id);
+      if (picked.length >= limit) break;
+    }
+  }
+
+  return picked;
+}
+
+export function selectHighlightCliffs(
+  cliffs: AnalyticsCliffItem[],
+  limit: number,
+  uniqueRulesOnly = true,
+): AnalyticsCliffItem[] {
+  const nonZero = cliffs.filter((c) => Math.abs(c.medianDelta) >= 0.1);
+  const pool = nonZero.length > 0 ? nonZero : cliffs;
+  const rankedPool = [...pool].sort((a, b) => {
+    if (a.scope !== b.scope) {
+      return a.scope === 'behavioural' ? -1 : 1;
+    }
+    return a.pValue - b.pValue || Math.abs(b.medianDelta) - Math.abs(a.medianDelta);
+  });
+
+  if (!uniqueRulesOnly) {
+    return rankedPool.slice(0, limit);
+  }
+
+  const picked: AnalyticsCliffItem[] = [];
+  const pickedIds = new Set<number>();
+  const seenFeatures = new Set<string>();
+  const seenRuleKeys = new Set<string>();
+
+  for (const item of rankedPool) {
+    const ruleKey = `${item.featureKey}:${item.thresholdRule}`;
+    if (seenFeatures.has(item.featureKey) || seenRuleKeys.has(ruleKey)) continue;
+    seenFeatures.add(item.featureKey);
+    seenRuleKeys.add(ruleKey);
+    picked.push(item);
+    pickedIds.add(item.id);
+    if (picked.length >= limit) break;
+  }
+
+  if (picked.length < limit) {
+    for (const item of rankedPool) {
+      const ruleKey = `${item.featureKey}:${item.thresholdRule}`;
+      if (pickedIds.has(item.id) || seenRuleKeys.has(ruleKey)) continue;
+      seenRuleKeys.add(ruleKey);
+      picked.push(item);
+      pickedIds.add(item.id);
+      if (picked.length >= limit) break;
+    }
+  }
+
   return picked;
 }
 
