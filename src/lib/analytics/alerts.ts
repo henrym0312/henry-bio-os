@@ -159,47 +159,39 @@ async function collectActiveAlerts(now: Date, nowMs: number): Promise<{
 
   const alerts: TriggeredAlert[] = [];
 
+  const { hour: londonHour, minute: londonMinute } = getLondonHourAndMinute(now);
+
   const readiness = latestRow?.values['daily_readiness.score'];
   const flaggedMetrics = anomalies.metrics.filter((m) => m.isAdverseDeviation);
   if (anomalies.strainAlert || flaggedMetrics.length >= 2) {
     const details = flaggedMetrics
-      .map((m) => `${m.label} (z=${m.zScore !== null ? m.zScore.toFixed(2) : 'n/a'})`)
+      .map((m) => `${m.label} (${m.zScore !== null ? m.zScore.toFixed(1) : 'n/a'}s)`)
       .join(', ');
     alerts.push({
       id: `strain-${targetDay}`,
-      title: 'Physiological Strain Alert',
-      message: `30d Z-score strain detected on ${targetDay}: ${details || 'multiple markers elevated'}.`,
+      title: 'Strain Alert',
+      message: details || 'Multiple 30d markers elevated.',
       severity: 'critical',
       url: 'https://bio.henrymilner.uk',
     });
   } else if (typeof readiness === 'number' && readiness < 70) {
     alerts.push({
       id: `readiness-low-${targetDay}`,
-      title: 'Readiness Below 70',
-      message: `Readiness at ${Math.round(readiness)} pts on ${targetDay}. Prioritise recovery and training load restraint.`,
+      title: 'Low Readiness',
+      message: `Readiness ${Math.round(readiness)} pts. Prioritise recovery.`,
       severity: 'warning',
       url: 'https://bio.henrymilner.uk',
-    });
-  }
-
-  const bedtimeSerum = latestRow?.values['bedtime_serum_ng_ml'];
-  if (typeof bedtimeSerum === 'number' && bedtimeSerum > 35) {
-    alerts.push({
-      id: `bedtime-serum-${targetDay}`,
-      title: 'Elevated Bedtime Serum',
-      message: `Projected bedtime concentration is ${bedtimeSerum.toFixed(1)} ng/mL (>35 ng/mL ceiling); expect deep sleep or HRV drag.`,
-      severity: bedtimeSerum > 55 ? 'critical' : 'warning',
-      url: 'https://bio.henrymilner.uk/sleep',
     });
   }
 
   const totalSleepMin = latestRow?.values['sleep.total_sleep_duration'];
   const deepSleepMin = latestRow?.values['sleep.deep_sleep_duration'];
   if (typeof totalSleepMin === 'number' && totalSleepMin < 390) {
+    const totalSleepHours = (totalSleepMin / 60).toFixed(1);
     alerts.push({
       id: `sleep-short-${targetDay}`,
-      title: 'Short Sleep Duration',
-      message: `Total sleep ${Math.round(totalSleepMin)} min (<390 min) on ${targetDay}.`,
+      title: 'Short Sleep',
+      message: `Slept ${totalSleepHours}h (<6.5h).`,
       severity: 'warning',
       url: 'https://bio.henrymilner.uk/sleep',
     });
@@ -207,22 +199,9 @@ async function collectActiveAlerts(now: Date, nowMs: number): Promise<{
     alerts.push({
       id: `deep-sleep-low-${targetDay}`,
       title: 'Low Deep Sleep',
-      message: `Deep sleep ${Math.round(deepSleepMin)} min (<60 min) on ${targetDay}.`,
+      message: `Deep sleep ${Math.round(deepSleepMin)} min (<60 min).`,
       severity: 'warning',
       url: 'https://bio.henrymilner.uk/sleep',
-    });
-  }
-
-  const remainingTasks = latestRow?.values['daily_task_metrics.remainingCount'];
-  const { hour: londonHour, minute: londonMinute } = getLondonHourAndMinute(now);
-  const hour = londonHour;
-  if (typeof remainingTasks === 'number' && remainingTasks >= 6 && hour >= 18) {
-    alerts.push({
-      id: `tasks-backlog-${targetDay}`,
-      title: 'Task Backlog Remaining',
-      message: `${Math.round(remainingTasks)} reminders still left on ${targetDay}. Clear, defer, or cap WIP before winding down.`,
-      severity: 'warning',
-      url: 'https://bio.henrymilner.uk',
     });
   }
 
@@ -235,8 +214,8 @@ async function collectActiveAlerts(now: Date, nowMs: number): Promise<{
   ) {
     alerts.push({
       id: `ring-battery-${targetDay}`,
-      title: 'Oura Ring Battery Low',
-      message: `Ring battery at ${latestBattery.level}% and not charging. Top up before sleep.`,
+      title: 'Ring Battery Low',
+      message: `Battery at ${latestBattery.level}%. Charge before bed.`,
       severity: latestBattery.level <= 10 ? 'critical' : 'warning',
       url: 'https://bio.henrymilner.uk/settings',
     });
@@ -248,8 +227,8 @@ async function collectActiveAlerts(now: Date, nowMs: number): Promise<{
     const sample = recentFailures[0];
     alerts.push({
       id: `sync-error-${sample.id}`,
-      title: 'Pipeline Sync Error',
-      message: `${sample.source} (${sample.dataType}) returned HTTP ${sample.statusCode}: ${sample.errorMessage ?? 'check sync_logs'}.`,
+      title: 'Sync Error',
+      message: `${sample.source} (${sample.dataType}): HTTP ${sample.statusCode}.`,
       severity: 'critical',
       url: 'https://bio.henrymilner.uk/settings',
     });
@@ -260,12 +239,11 @@ async function collectActiveAlerts(now: Date, nowMs: number): Promise<{
   const nowMinutes = londonHour * 60 + londonMinute;
   const reminderMinutes = (Number.isFinite(remH) ? remH : 20) * 60 + (Number.isFinite(remM) ? remM : 0);
 
-  // Trigger 3-hour-prior bedtime reminder once window is reached (within 90m after reminderTime)
   if (nowMinutes >= reminderMinutes && nowMinutes <= reminderMinutes + 180) {
     alerts.push({
       id: `bedtime-prep-${targetDay}`,
-      title: `Bedtime in 3h (${sleepPlan.targetBedtime})`,
-      message: `Target sleep ${sleepPlan.recommendedSleepFormatted} (min okay: ${formatMinutesAsHm(sleepPlan.minimumOkayMin)}) before ${sleepPlan.wakeTime} wake. ${sleepPlan.reasons.join('; ')}.`,
+      title: `Bed at ${sleepPlan.targetBedtime} (3h)`,
+      message: `Target ${sleepPlan.recommendedSleepFormatted} (min ${formatMinutesAsHm(sleepPlan.minimumOkayMin)}) for ${sleepPlan.wakeTime} wake.`,
       severity: 'warning',
       url: 'https://bio.henrymilner.uk/sleep',
     });
@@ -363,7 +341,6 @@ export async function evaluateAlerts(): Promise<AlertEvaluationResult> {
         const headers: Record<string, string> = {
           Title: alert.title,
           Priority: alert.severity === 'critical' ? 'urgent' : 'default',
-          Tags: alert.severity === 'critical' ? 'rotating_light' : 'bar_chart',
           Click: alert.url,
         };
         if (token) {
