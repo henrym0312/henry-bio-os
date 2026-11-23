@@ -6,9 +6,7 @@ import * as schema from './schema';
 neonConfig.webSocketConstructor = ws;
 
 declare global {
-  // eslint-disable-next-line no-var
   var __henryBioOsPool: Pool | undefined;
-  // eslint-disable-next-line no-var
   var __henryBioOsDb: NeonDatabase<typeof schema> | undefined;
 }
 
