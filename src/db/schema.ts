@@ -641,3 +641,93 @@ export const lifeSubjectiveDaily = pgTable('life_subjective_daily', {
   loggedAt: timestamp('logged_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
+
+// ============================================================================
+// E. HenryLifeOS Pre-Computed Causal Analytics & Experiment Tables
+// ============================================================================
+
+export const lifeAnalyticsRuns = pgTable('life_analytics_runs', {
+  id: serial('id').primaryKey(),
+  ranAt: timestamp('ran_at', { withTimezone: true }).defaultNow().notNull(),
+  windowDays: integer('window_days').notNull(),
+  matrixDays: integer('matrix_days').notNull(),
+  summaryJson: jsonb('summary_json').$type<Record<string, unknown>>().notNull(),
+});
+
+export const lifeInsightsDrivers = pgTable(
+  'life_insights_drivers',
+  {
+    id: serial('id').primaryKey(),
+    runId: integer('run_id').notNull(),
+    outcomeKey: text('outcome_key').notNull(),
+    outcomeLabel: text('outcome_label').notNull(),
+    featureKey: text('feature_key').notNull(),
+    featureLabel: text('feature_label').notNull(),
+    lagDays: integer('lag_days').notNull(),
+    sampleN: integer('sample_n').notNull(),
+    spearmanR: doublePrecision('spearman_r').notNull(),
+    pValue: doublePrecision('p_value').notNull(),
+    fdrQValue: doublePrecision('fdr_q_value'),
+    shapImportance: doublePrecision('shap_importance'),
+    marginalEffect: doublePrecision('marginal_effect'),
+    direction: text('direction').notNull(),
+    confidenceTier: text('confidence_tier').notNull(),
+  },
+  (table) => [
+    index('idx_life_insights_drivers_run_id').on(table.runId),
+    index('idx_life_insights_drivers_outcome_lag').on(table.outcomeKey, table.lagDays),
+  ],
+);
+
+export const lifeThresholdCliffs = pgTable(
+  'life_threshold_cliffs',
+  {
+    id: serial('id').primaryKey(),
+    runId: integer('run_id').notNull(),
+    outcomeKey: text('outcome_key').notNull(),
+    outcomeLabel: text('outcome_label').notNull(),
+    featureKey: text('feature_key').notNull(),
+    featureLabel: text('feature_label').notNull(),
+    thresholdRule: text('threshold_rule').notNull(),
+    lowBucketLabel: text('low_bucket_label').notNull(),
+    highBucketLabel: text('high_bucket_label').notNull(),
+    lowN: integer('low_n').notNull(),
+    highN: integer('high_n').notNull(),
+    lowMedian: doublePrecision('low_median').notNull(),
+    highMedian: doublePrecision('high_median').notNull(),
+    medianDelta: doublePrecision('median_delta').notNull(),
+    pValue: doublePrecision('p_value').notNull(),
+  },
+  (table) => [index('idx_life_threshold_cliffs_run_id').on(table.runId)],
+);
+
+export const lifeGroupContrasts = pgTable(
+  'life_group_contrasts',
+  {
+    id: serial('id').primaryKey(),
+    runId: integer('run_id').notNull(),
+    cohortLabel: text('cohort_label').notNull(),
+    featureKey: text('feature_key').notNull(),
+    featureLabel: text('feature_label').notNull(),
+    best10Mean: doublePrecision('best_10_mean').notNull(),
+    worst10Mean: doublePrecision('worst_10_mean').notNull(),
+    effectSizeD: doublePrecision('effect_size_d').notNull(),
+    sampleN: integer('sample_n').notNull(),
+  },
+  (table) => [index('idx_life_group_contrasts_run_id').on(table.runId)],
+);
+
+export const lifeExperiments = pgTable('life_experiments', {
+  id: serial('id').primaryKey(),
+  name: text('name').notNull(),
+  hypothesis: text('hypothesis').notNull(),
+  featureKey: text('feature_key').notNull(),
+  targetOutcomes: jsonb('target_outcomes').$type<string[]>().notNull(),
+  startDay: text('start_day').notNull(),
+  endDay: text('end_day').notNull(),
+  baselineDays: integer('baseline_days').default(21).notNull(),
+  status: text('status').default('active').notNull(),
+  verdict: text('verdict'),
+  resultsJson: jsonb('results_json').$type<Record<string, unknown> | null>(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
