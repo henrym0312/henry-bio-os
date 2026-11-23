@@ -1,7 +1,9 @@
-import { neon } from '@neondatabase/serverless';
+import { Pool, neonConfig } from '@neondatabase/serverless';
 import dotenv from 'dotenv';
+import ws from 'ws';
 
 dotenv.config({ path: '.env.local' });
+neonConfig.webSocketConstructor = ws;
 
 /**
  * Idempotent additive migration for the HenryLifeOS Phase 4 analytics layer:
@@ -14,7 +16,7 @@ async function main() {
     throw new Error('DATABASE_URL environment variable is not defined');
   }
 
-  const sql = neon(connectionString);
+  const pool = new Pool({ connectionString });
 
   const statements: Array<{ label: string; query: string }> = [
     {
@@ -489,37 +491,40 @@ async function main() {
     },
   ];
 
-  for (const stmt of statements) {
-    await sql.query(stmt.query);
-    console.log(`Applied: ${stmt.label}`);
+  try {
+    for (const stmt of statements) {
+      await pool.query(stmt.query);
+      console.log(`Applied: ${stmt.label}`);
+    }
+
+    const viewCheck = await pool.query(`
+      SELECT
+        count(*)::int AS total_days,
+        min(day) AS min_day,
+        max(day) AS max_day,
+        count(hrv_avg_ms)::int AS hrv_n,
+        count(readiness_score)::int AS readiness_n,
+        count(mac_mins)::int AS screentime_n,
+        count(adhd_total_mg)::int AS meds_n,
+        count(am_pills_taken)::int AS supplements_n,
+        count(emails_total)::int AS comms_n,
+        count(temp_mean_c)::int AS weather_n,
+        count(hours_at_home)::int AS presence_n,
+        count(audio_playback_mins)::int AS media_n,
+        count(calendar_event_count)::int AS calendar_n,
+        count(bedtime_drift_mins)::int AS bedtime_drift_n,
+        count(waketime_drift_mins)::int AS waketime_drift_n,
+        count(sleep_schedule_drift_mins)::int AS sleep_drift_n,
+        count(screen_to_sleep_gap_mins)::int AS screen_gap_n
+      FROM daily_life_matrix
+    `);
+    const stCount = await pool.query(`SELECT count(*)::int AS count FROM st_daily_summary`);
+
+    console.log('daily_life_matrix summary:', JSON.stringify(viewCheck.rows[0]));
+    console.log('st_daily_summary count:', JSON.stringify(stCount.rows[0]));
+  } finally {
+    await pool.end();
   }
-
-  const viewCheck = await sql`
-    SELECT
-      count(*)::int AS total_days,
-      min(day) AS min_day,
-      max(day) AS max_day,
-      count(hrv_avg_ms)::int AS hrv_n,
-      count(readiness_score)::int AS readiness_n,
-      count(mac_mins)::int AS screentime_n,
-      count(adhd_total_mg)::int AS meds_n,
-      count(am_pills_taken)::int AS supplements_n,
-      count(emails_total)::int AS comms_n,
-      count(temp_mean_c)::int AS weather_n,
-      count(hours_at_home)::int AS presence_n,
-      count(audio_playback_mins)::int AS media_n,
-      count(calendar_event_count)::int AS calendar_n,
-      count(bedtime_drift_mins)::int AS bedtime_drift_n,
-      count(waketime_drift_mins)::int AS waketime_drift_n,
-      count(sleep_schedule_drift_mins)::int AS sleep_drift_n,
-      count(screen_to_sleep_gap_mins)::int AS screen_gap_n
-    FROM daily_life_matrix
-  `;
-  const stCount = await sql`SELECT count(*)::int AS count FROM st_daily_summary`;
-
-  console.log('daily_life_matrix summary:', JSON.stringify(viewCheck[0]));
-  console.log('st_daily_summary count:', JSON.stringify(stCount[0]));
-  process.exit(0);
 }
 
 main().catch((err) => {
