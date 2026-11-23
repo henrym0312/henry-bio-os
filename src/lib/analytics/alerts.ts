@@ -1,6 +1,12 @@
 import { desc, eq, gte } from 'drizzle-orm';
 import { getDb } from '@/db';
-import { alertCooldowns, ouraRingBatteryLevel, syncLogs } from '@/db/schema';
+import {
+  alertCooldowns,
+  lifeSubjectiveDaily,
+  ouraRingBatteryLevel,
+  syncLogs,
+} from '@/db/schema';
+import { toLondonDay } from '@/lib/life/helpers';
 import {
   buildDailyTelemetryMatrix,
   computeAnomalyStatusFromMatrix,
@@ -137,8 +143,9 @@ async function collectActiveAlerts(now: Date, nowMs: number): Promise<{
   sleepPlan: NightlySleepPlan;
 }> {
   const db = getDb();
+  const todayLondonDay = toLondonDay(now);
 
-  const [matrix, latestBatteryRows, failedSyncRows] = await Promise.all([
+  const [matrix, latestBatteryRows, failedSyncRows, todayCheckInRows] = await Promise.all([
     buildDailyTelemetryMatrix(),
     db
       .select()
@@ -151,6 +158,11 @@ async function collectActiveAlerts(now: Date, nowMs: number): Promise<{
       .where(gte(syncLogs.statusCode, 400))
       .orderBy(desc(syncLogs.createdAt))
       .limit(5),
+    db
+      .select({ day: lifeSubjectiveDaily.day })
+      .from(lifeSubjectiveDaily)
+      .where(eq(lifeSubjectiveDaily.day, todayLondonDay))
+      .limit(1),
   ]);
 
   const latestRow = matrix.length > 0 ? matrix[matrix.length - 1] : null;
@@ -245,6 +257,16 @@ async function collectActiveAlerts(now: Date, nowMs: number): Promise<{
       message: `Target ${sleepPlan.recommendedSleepFormatted} (min ${formatMinutesAsHm(sleepPlan.minimumOkayMin)}) for ${sleepPlan.wakeTime} wake.`,
       severity: 'warning',
       url: 'https://bio.henrymilner.uk/sleep',
+    });
+  }
+
+  if (londonHour >= 21 && londonHour < 24 && todayCheckInRows.length === 0) {
+    alerts.push({
+      id: `daily-checkin-${todayLondonDay}`,
+      title: 'Daily Check-In',
+      message: "Log today's energy, focus, mood, and social score (10s).",
+      severity: 'warning',
+      url: 'https://bio.henrymilner.uk/log',
     });
   }
 

@@ -10,6 +10,7 @@ import {
   FlaskConical,
   Loader2,
   Plus,
+  SlidersHorizontal,
   TrendingDown,
   TrendingUp,
   X,
@@ -18,47 +19,55 @@ import {
   createExperimentAction,
   updateExperimentStatusAction,
 } from '@/app/insights/actions';
-import type {
-  AnalyticsContrastItem,
-  AnalyticsDriverItem,
-  FeatureScope,
-  InsightsPayload,
-} from '@/lib/analytics/insights';
+import {
+  formatOutcomeDelta,
+  formatOutcomeValue,
+  getOutcomeLabel,
+  type AnalyticsCliffItem,
+  type AnalyticsContrastItem,
+  type AnalyticsDriverItem,
+  type ConfidenceLabel,
+  type EffectSizeLabel,
+  type FeatureScope,
+  type InsightsPayload,
+  type StrengthBand,
+} from '@/lib/analytics/insights-labels';
 import { cn } from '@/lib/utils';
 
 type ScopeFilter = 'behavioural' | 'environmental' | 'all';
 
 const OUTCOME_FILTERS = [
   { key: 'all', label: 'All Outcomes' },
-  { key: 'hrv_avg_ms', label: 'HRV' },
+  { key: 'hrv_avg_ms', label: 'HRV (Recovery)' },
+  { key: 'lowest_hr_bpm', label: 'Resting Heart Rate' },
   { key: 'deep_sleep_min', label: 'Deep Sleep' },
-  { key: 'lowest_hr_bpm', label: 'Lowest HR' },
-  { key: 'readiness_score', label: 'Readiness' },
   { key: 'sleep_efficiency_pct', label: 'Sleep Efficiency' },
+  { key: 'readiness_score', label: 'Readiness Score' },
   { key: 'mental_focus', label: 'Mental Focus' },
   { key: 'task_completion_rate', label: 'Task Completion' },
 ] as const;
 
 const EXPERIMENT_OUTCOME_OPTIONS = [
-  { key: 'hrv_avg_ms', label: 'Nocturnal HRV' },
-  { key: 'lowest_hr_bpm', label: 'Lowest HR' },
+  { key: 'hrv_avg_ms', label: 'HRV (Recovery)' },
+  { key: 'lowest_hr_bpm', label: 'Resting Heart Rate' },
   { key: 'readiness_score', label: 'Readiness Score' },
   { key: 'deep_sleep_min', label: 'Deep Sleep' },
   { key: 'sleep_efficiency_pct', label: 'Sleep Efficiency' },
-  { key: 'sleep_latency_min', label: 'Sleep Latency' },
+  { key: 'sleep_latency_min', label: 'Time to Fall Asleep' },
   { key: 'mental_focus', label: 'Mental Focus' },
   { key: 'task_completion_rate', label: 'Task Completion' },
 ] as const;
 
 const FEATURE_KEY_OPTIONS = [
-  { key: 'late_comms_count', label: 'Late-Night Comms (21:00-04:00)' },
-  { key: 'late_night_screen_mins', label: 'Late-Night Screen Time (min)' },
-  { key: 'am_pills_taken', label: 'AM Supplements Taken' },
-  { key: 'pm_pills_taken', label: 'PM Supplements Taken' },
-  { key: 'time_in_daylight_mins', label: 'Time in Daylight (min)' },
-  { key: 'bedtime_caffeine_mg', label: 'Bedtime Residual Caffeine (mg)' },
-  { key: 'workout_mins', label: 'Exercise / Workout (min)' },
-  { key: 'tv_late_mins', label: 'Late TV Usage (min)' },
+  { key: 'late_comms_count', label: 'Messages After 9pm' },
+  { key: 'late_night_screen_mins', label: 'Late-Night Screen Time' },
+  { key: 'spend_social_pubs_gbp', label: 'Pub & Social Spending' },
+  { key: 'am_pills_taken', label: 'AM Supplements' },
+  { key: 'pm_pills_taken', label: 'PM Supplements' },
+  { key: 'time_in_daylight_mins', label: 'Time Outside in Daylight' },
+  { key: 'bedtime_caffeine_mg', label: 'Caffeine Left at Bedtime' },
+  { key: 'workout_mins', label: 'Exercise Time' },
+  { key: 'tv_late_mins', label: 'Late-Night TV Time' },
   { key: 'alcohol_units', label: 'Alcohol Units' },
   { key: 'imessages_total', label: 'Total iMessages' },
 ] as const;
@@ -73,34 +82,34 @@ interface ExperimentPreset {
 
 const EXPERIMENT_PRESETS: ExperimentPreset[] = [
   {
-    label: 'Cap Late Comms <= 10 after 21:00',
-    name: 'Cap Late Comms <= 10 after 21:00',
+    label: 'Cap Messages After 9pm to 10 or Fewer',
+    name: 'Cap Messages After 9pm (<= 10)',
     hypothesis:
-      'Limiting messaging and email activity after 21:00 to 10 events or fewer reduces sympathetic arousal before sleep, improving nocturnal HRV and lowering minimum heart rate.',
+      'Keeping messaging and email activity after 9pm to 10 messages or fewer lowers evening alertness before bed, helping overnight HRV recovery and resting heart rate.',
     featureKey: 'late_comms_count',
     targetOutcomes: ['hrv_avg_ms', 'lowest_hr_bpm', 'readiness_score'],
   },
   {
-    label: 'No Screens After 22:00',
-    name: 'No Screens After 22:00',
+    label: 'No Screens After 10pm',
+    name: 'No Screens After 10pm',
     hypothesis:
-      'Eliminating Mac and iPhone screen exposure after 22:00 improves deep sleep duration, sleep efficiency, and next-day readiness.',
+      'Avoiding Mac and iPhone screen use after 10pm increases deep sleep duration, sleep efficiency, and next-morning readiness.',
     featureKey: 'late_night_screen_mins',
     targetOutcomes: ['hrv_avg_ms', 'deep_sleep_min', 'sleep_efficiency_pct'],
   },
   {
-    label: 'Consistent AM+PM Supplements',
-    name: 'Consistent AM+PM Supplements',
+    label: 'Consistent AM & PM Supplements',
+    name: 'Consistent AM & PM Supplements',
     hypothesis:
-      'Maintaining uninterrupted daily AM and PM supplement adherence improves readiness recovery and nocturnal sleep stability.',
+      'Taking both morning and evening supplements without missed days steadies readiness scores and overnight recovery.',
     featureKey: 'am_pills_taken',
     targetOutcomes: ['readiness_score', 'hrv_avg_ms', 'deep_sleep_min'],
   },
   {
-    label: '25m+ Morning Daylight',
-    name: '25m+ Morning Daylight',
+    label: '25m+ Outdoor Daylight',
+    name: '25m+ Outdoor Daylight',
     hypothesis:
-      'Accumulating at least 25 minutes of outdoor daylight anchors circadian timing, shortening sleep onset latency and lifting morning readiness.',
+      'Spending at least 25 minutes outdoors in daylight anchors circadian timing, helping sleep onset and next-day readiness.',
     featureKey: 'time_in_daylight_mins',
     targetOutcomes: ['hrv_avg_ms', 'sleep_latency_min', 'readiness_score'],
   },
@@ -118,7 +127,7 @@ function formatLondonTimestamp(iso: string | null): string {
     hour: '2-digit',
     minute: '2-digit',
     hourCycle: 'h23',
-  }).format(dt)} Europe/London`;
+  }).format(dt)} London`;
 }
 
 function formatPValue(val: number | null): string {
@@ -132,18 +141,6 @@ function formatPValue(val: number | null): string {
 function formatSigned(val: number, decimals = 3): string {
   const fixed = val.toFixed(decimals);
   return val > 0 ? `+${fixed}` : fixed;
-}
-
-function formatDeltaWithUnit(delta: number, unit: string): string {
-  const rounded =
-    Math.abs(delta % 1) < 0.001 ? String(Math.round(delta)) : delta.toFixed(1);
-  const signed = delta > 0 ? `+${rounded}` : rounded;
-  return unit ? `${signed} ${unit}` : signed;
-}
-
-function formatLagLabel(lagDays: number): string {
-  if (lagDays === 0) return 'Same Day';
-  return `+${lagDays}d Lag`;
 }
 
 function todayLondonIso(): string {
@@ -161,94 +158,152 @@ function addDaysIso(dayIso: string, deltaDays: number): string {
   return dt.toISOString().slice(0, 10);
 }
 
+function confidenceBadgeStyle(label: ConfidenceLabel): string {
+  if (label === 'High Confidence') {
+    return 'bg-[#30D158]/15 text-[#30D158] border-[#30D158]/30';
+  }
+  if (label === 'Moderate Confidence') {
+    return 'bg-[#0A84FF]/15 text-[#0A84FF] border-[#0A84FF]/30';
+  }
+  return 'bg-[#141416] text-[#8E8E93] border-white/[0.08]';
+}
+
+function strengthBadgeStyle(strength: StrengthBand, positive: boolean): string {
+  if (strength === 'Strong') {
+    return positive
+      ? 'bg-[#30D158]/15 text-[#30D158] border-[#30D158]/30'
+      : 'bg-[#FF453A]/15 text-[#FF453A] border-[#FF453A]/30';
+  }
+  if (strength === 'Moderate') {
+    return 'bg-[#FF9F0A]/15 text-[#FF9F0A] border-[#FF9F0A]/30';
+  }
+  return 'bg-[#141416] text-[#D1D1D6] border-white/[0.08]';
+}
+
+function impactSizeBadgeStyle(label: EffectSizeLabel): string {
+  if (label === 'Very Large') {
+    return 'bg-[#0A84FF]/15 text-[#0A84FF] border-[#0A84FF]/30';
+  }
+  if (label === 'Large') {
+    return 'bg-[#30D158]/15 text-[#30D158] border-[#30D158]/30';
+  }
+  return 'bg-[#1C1C1E] text-[#D1D1D6] border-white/[0.08]';
+}
+
 function contrastScopeBadge(scope: FeatureScope): string {
-  return scope === 'environmental' ? 'Seasonal' : 'Behavioural';
+  return scope === 'environmental' ? 'Seasonal' : 'Habit';
+}
+
+function selectHighlightDrivers(
+  list: AnalyticsDriverItem[],
+  limit: number,
+): AnalyticsDriverItem[] {
+  const picked: AnalyticsDriverItem[] = [];
+  const seenGroupOutcome = new Set<string>();
+  for (const item of list) {
+    const key = `${item.outcomeKey}|${item.dedupeGroup}`;
+    if (seenGroupOutcome.has(key)) continue;
+    seenGroupOutcome.add(key);
+    picked.push(item);
+    if (picked.length >= limit) break;
+  }
+  if (picked.length < limit) {
+    const pickedIds = new Set(picked.map((p) => p.id));
+    for (const item of list) {
+      if (pickedIds.has(item.id)) continue;
+      picked.push(item);
+      if (picked.length >= limit) break;
+    }
+  }
+  return picked;
+}
+
+function selectHighlightCliffs(
+  list: AnalyticsCliffItem[],
+  limit: number,
+): AnalyticsCliffItem[] {
+  const nonZero = list.filter((c) => Math.abs(c.medianDelta) >= 0.1);
+  const pool = nonZero.length >= limit ? nonZero : list;
+  return pool.slice(0, limit);
 }
 
 function DriverCard({
   driver,
   variant,
   showScopeTag,
+  showTechnicalStats,
 }: {
   driver: AnalyticsDriverItem;
   variant: 'positive' | 'negative';
   showScopeTag: boolean;
+  showTechnicalStats: boolean;
 }) {
-  const accentText = variant === 'positive' ? 'text-[#30D158]' : 'text-[#FF453A]';
-  const accentPill =
-    variant === 'positive'
-      ? 'bg-[#30D158]/15 text-[#30D158] border-[#30D158]/30'
-      : 'bg-[#FF453A]/15 text-[#FF453A] border-[#FF453A]/30';
-  const significanceLabel =
-    driver.fdrQValue !== null ? `q ${formatPValue(driver.fdrQValue)}` : `p ${formatPValue(driver.pValue)}`;
+  const isPositive = variant === 'positive';
 
   return (
-    <div className="rounded-lg bg-[#1C1C1E]/70 border border-white/[0.08] p-3.5 space-y-2.5">
+    <div className="rounded-lg bg-[#1C1C1E]/75 border border-white/[0.08] p-4 space-y-2.5">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="text-xs font-semibold text-[#F5F5F7] truncate">
+          <div className="text-sm font-semibold text-[#F5F5F7]">
             {driver.featureLabel}
           </div>
-          <div className="text-[11px] text-[#8E8E93] mt-0.5 flex flex-wrap items-center gap-1.5">
-            <span>Target:</span>
-            <span className="text-[#D1D1D6]">{driver.outcomeLabel}</span>
+          <div className="text-xs text-[#8E8E93] mt-0.5">
+            Outcome: <span className="text-[#D1D1D6]">{driver.outcomeLabel}</span>
           </div>
         </div>
-        <div className="flex items-center gap-1.5 shrink-0">
+
+        <div className="flex flex-wrap items-center justify-end gap-1.5 shrink-0">
           {showScopeTag && (
-            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#141416] border border-white/[0.08] text-[#8E8E93]">
-              {driver.scope === 'environmental' ? 'Env' : 'Habit'}
+            <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-[#141416] border border-white/[0.08] text-[#8E8E93]">
+              {driver.scope === 'environmental' ? 'Weather' : 'Habit'}
             </span>
           )}
-          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#0A84FF]/15 text-[#0A84FF] border border-[#0A84FF]/25">
-            {formatLagLabel(driver.lagDays)}
+          <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-[#0A84FF]/15 text-[#0A84FF] border border-[#0A84FF]/25">
+            {driver.lagLabel}
           </span>
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-2 pt-1 border-t border-white/[0.06] text-[11px] font-mono tabular-nums">
-        <div>
-          <div className="text-[10px] text-[#8E8E93] uppercase">Spearman r</div>
-          <div className={cn('text-sm font-semibold', accentText)}>
-            {formatSigned(driver.spearmanR, 3)}
-          </div>
+      <p className="text-xs text-[#D1D1D6] leading-relaxed">
+        {driver.takeawayText}
+      </p>
+
+      <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-white/[0.06] text-[11px]">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span
+            className={cn(
+              'px-2 py-0.5 rounded-full border font-medium',
+              strengthBadgeStyle(driver.strengthLabel, isPositive),
+            )}
+          >
+            {driver.strengthLabel}
+          </span>
+          <span
+            className={cn(
+              'px-2 py-0.5 rounded-full border font-medium',
+              confidenceBadgeStyle(driver.confidenceLabel),
+            )}
+          >
+            {driver.confidenceLabel}
+          </span>
         </div>
-        <div>
-          <div className="text-[10px] text-[#8E8E93] uppercase">FDR / Sig</div>
-          <div className="text-[#F5F5F7] mt-0.5">{significanceLabel}</div>
-        </div>
-        <div className="text-right">
-          <div className="text-[10px] text-[#8E8E93] uppercase">Sample</div>
-          <div className="mt-0.5 flex items-center justify-end gap-1.5">
-            <span className="text-[#F5F5F7]">n={driver.sampleN}</span>
-            <span
-              className={cn(
-                'text-[10px] px-1.5 py-0.2 rounded border uppercase',
-                driver.confidenceTier === 'high'
-                  ? accentPill
-                  : 'bg-[#141416] text-[#8E8E93] border-white/[0.08]',
-              )}
-            >
-              {driver.confidenceTier}
-            </span>
-          </div>
-        </div>
+
+        <span className="text-[#8E8E93] font-mono tabular-nums">
+          Based on {driver.sampleN} days
+        </span>
       </div>
 
-      {(driver.marginalEffect !== null || driver.shapImportance !== null) && (
-        <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono tabular-nums text-[#8E8E93] pt-1 border-t border-white/[0.06]">
-          <span>
-            RidgeCV effect:{' '}
-            <span className="text-[#D1D1D6]">
-              {driver.marginalEffect !== null ? formatSigned(driver.marginalEffect, 3) : 'n/a'}
-            </span>
-          </span>
-          <span>
-            Importance:{' '}
-            <span className="text-[#D1D1D6]">
-              {driver.shapImportance !== null ? driver.shapImportance.toFixed(4) : 'n/a'}
-            </span>
-          </span>
+      {showTechnicalStats && (
+        <div className="pt-2 border-t border-white/[0.06] text-[11px] font-mono tabular-nums text-[#8E8E93] flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span>r = {formatSigned(driver.spearmanR, 3)}</span>
+          <span>p = {formatPValue(driver.pValue)}</span>
+          {driver.fdrQValue !== null && (
+            <span>FDR q = {formatPValue(driver.fdrQValue)}</span>
+          )}
+          {driver.marginalEffect !== null && (
+            <span>RidgeCV = {formatSigned(driver.marginalEffect, 3)}</span>
+          )}
+          <span>n = {driver.sampleN}</span>
         </div>
       )}
     </div>
@@ -263,7 +318,9 @@ export function InsightsDashboard({
   const router = useRouter();
   const [outcomeFilter, setOutcomeFilter] = useState<string>('all');
   const [scopeFilter, setScopeFilter] = useState<ScopeFilter>('behavioural');
-  const [showAllDrivers, setShowAllDrivers] = useState(false);
+  const [showTechnicalStats, setShowTechnicalStats] = useState(false);
+  const [showAllPositive, setShowAllPositive] = useState(false);
+  const [showAllNegative, setShowAllNegative] = useState(false);
   const [showAllCliffs, setShowAllCliffs] = useState(false);
   const [contrastScope, setContrastScope] = useState<'all' | 'behavioural' | 'environmental'>('all');
 
@@ -300,6 +357,15 @@ export function InsightsDashboard({
     [filteredDrivers],
   );
 
+  const visiblePositiveDrivers = useMemo(
+    () => (showAllPositive ? positiveDrivers : selectHighlightDrivers(positiveDrivers, 5)),
+    [positiveDrivers, showAllPositive],
+  );
+  const visibleNegativeDrivers = useMemo(
+    () => (showAllNegative ? negativeDrivers : selectHighlightDrivers(negativeDrivers, 5)),
+    [negativeDrivers, showAllNegative],
+  );
+
   const sortedCliffs = useMemo(() => {
     const base = initialData.thresholdCliffs.filter((c) => {
       if (outcomeFilter !== 'all' && c.outcomeKey !== outcomeFilter) return false;
@@ -314,13 +380,15 @@ export function InsightsDashboard({
     });
   }, [initialData.thresholdCliffs, outcomeFilter, scopeFilter]);
 
+  const visibleCliffs = useMemo(
+    () => (showAllCliffs ? sortedCliffs : selectHighlightCliffs(sortedCliffs, 6)),
+    [sortedCliffs, showAllCliffs],
+  );
+
   const filteredContrasts = useMemo<AnalyticsContrastItem[]>(() => {
     if (contrastScope === 'all') return initialData.groupContrasts;
     return initialData.groupContrasts.filter((c) => c.scope === contrastScope);
   }, [initialData.groupContrasts, contrastScope]);
-
-  const driverLimit = showAllDrivers ? 50 : 8;
-  const cliffLimit = showAllCliffs ? 40 : 10;
 
   const applyPreset = (preset: ExperimentPreset) => {
     setExpName(preset.name);
@@ -363,7 +431,7 @@ export function InsightsDashboard({
         setFormError(res.error);
         return;
       }
-      setFormSuccess(`Started N-of-1 trial: ${res.experiment.name}`);
+      setFormSuccess(`Started 14-day experiment: ${res.experiment.name}`);
       setFormOpen(false);
       router.refresh();
     });
@@ -379,7 +447,7 @@ export function InsightsDashboard({
         status,
         verdict:
           status === 'completed'
-            ? 'Trial period closed manually; awaiting next nightly analytics scoring.'
+            ? 'Trial period closed manually; awaiting next morning analytics scoring.'
             : 'Trial cancelled manually.',
       });
       router.refresh();
@@ -394,49 +462,50 @@ export function InsightsDashboard({
           <div className="flex items-center gap-2">
             <Compass className="w-5 h-5 text-[#0A84FF]" />
             <h1 className="text-xl font-semibold tracking-tight text-[#F5F5F7]">
-              Life Insights &amp; Causal Engine
+              Life Insights &amp; Habits
             </h1>
           </div>
           <p className="text-xs text-[#8E8E93] mt-1">
-            Last analytics run:{' '}
-            <span className="font-mono text-[#D1D1D6]">
-              {formatLondonTimestamp(initialData.latestRun?.ranAt ?? null)}
-            </span>{' '}
-            · Rolling window:{' '}
+            Updated {formatLondonTimestamp(initialData.latestRun?.ranAt ?? null)} · Rolling{' '}
             <span className="font-mono tabular-nums text-[#D1D1D6]">
-              {initialData.latestRun?.windowDays ?? 120}d
+              {initialData.latestRun?.windowDays ?? 120}-day
             </span>{' '}
-            · Matrix coverage:{' '}
+            analysis across{' '}
             <span className="font-mono tabular-nums text-[#D1D1D6]">
               {initialData.coverage.totalDays} days
-            </span>
-            {initialData.coverage.minDay && initialData.coverage.maxDay
-              ? ` (${initialData.coverage.minDay} to ${initialData.coverage.maxDay})`
-              : ''}
+            </span>{' '}
+            of personal history
           </p>
         </div>
 
-        <div className="flex items-center gap-2 text-xs font-mono tabular-nums">
-          <span className="px-2.5 py-1 rounded-md bg-[#141416] border border-white/[0.08] text-[#8E8E93]">
-            Run #{initialData.latestRun?.id ?? '0'}
+        <button
+          type="button"
+          onClick={() => setShowTechnicalStats((v) => !v)}
+          className={cn(
+            'inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors cursor-pointer self-start lg:self-auto',
+            showTechnicalStats
+              ? 'bg-[#0A84FF]/15 text-[#0A84FF] border-[#0A84FF]/40'
+              : 'bg-[#141416] text-[#8E8E93] border-white/[0.08] hover:text-[#F5F5F7]',
+          )}
+        >
+          <SlidersHorizontal className="w-3.5 h-3.5" />
+          <span>Show Technical Stats</span>
+          <span className="font-mono text-[10px] uppercase">
+            {showTechnicalStats ? 'ON' : 'OFF'}
           </span>
-          <span className="px-2.5 py-1 rounded-md bg-[#141416] border border-white/[0.08] text-[#D1D1D6]">
-            {initialData.behavioural.drivers.length} behavioural ·{' '}
-            {initialData.environmental.drivers.length} environmental drivers
-          </span>
-        </div>
+        </button>
       </div>
 
       {/* Section 1: Telemetry Coverage Strip */}
       <section className="rounded-xl bg-[#141416] border border-white/[0.08] p-4 space-y-3">
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-xs font-semibold uppercase tracking-wider text-[#F5F5F7]">
-            Telemetry Coverage Strip
+            Data Sources Connected
           </h2>
-          <div className="flex items-center gap-3 text-[11px] font-mono text-[#8E8E93]">
+          <div className="flex items-center gap-3 text-[11px] text-[#8E8E93]">
             <span className="inline-flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-[#30D158]" />
-              Established (30d+)
+              Established (30+ days)
             </span>
             <span className="inline-flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-[#0A84FF]" />
@@ -444,7 +513,7 @@ export function InsightsDashboard({
             </span>
             <span className="inline-flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-[#8E8E93]/50" />
-              Awaiting ingest
+              Awaiting first log
             </span>
           </div>
         </div>
@@ -487,19 +556,18 @@ export function InsightsDashboard({
         <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3">
           <div>
             <h2 className="text-sm font-semibold text-[#F5F5F7]">
-              Actionable Behavioural Drivers &amp; Drains
+              What Helps vs. What Drains Your Recovery
             </h2>
             <p className="text-xs text-[#8E8E93] mt-0.5">
-              Lagged Spearman rank associations with Benjamini-Hochberg FDR control and RidgeCV permutation importance.
+              Strongest day-to-day patterns across habits, screen time, spending, messaging, and environment.
             </p>
           </div>
 
-          {/* Scope Toggle */}
           <div className="inline-flex rounded-lg bg-[#1C1C1E] p-0.5 border border-white/[0.08] self-start">
             {(
               [
-                { key: 'behavioural', label: 'Behavioural Levers' },
-                { key: 'environmental', label: 'Environmental Context' },
+                { key: 'behavioural', label: 'Habits & Choices' },
+                { key: 'environmental', label: 'Weather & Season' },
                 { key: 'all', label: 'All' },
               ] as const
             ).map((opt) => (
@@ -548,25 +616,46 @@ export function InsightsDashboard({
                 Top Positive Drivers (Do More)
               </span>
               <span className="text-[11px] font-mono tabular-nums text-[#8E8E93]">
-                {positiveDrivers.length} signals
+                {positiveDrivers.length} found
               </span>
             </div>
 
-            {positiveDrivers.length === 0 ? (
+            {visiblePositiveDrivers.length === 0 ? (
               <div className="rounded-lg bg-[#1C1C1E]/50 border border-white/[0.06] p-4 text-xs text-[#8E8E93]">
-                No significant beneficial drivers matched this outcome and scope filter yet.
+                No beneficial drivers matched this filter yet.
               </div>
             ) : (
               <div className="space-y-2.5">
-                {positiveDrivers.slice(0, driverLimit).map((driver) => (
+                {visiblePositiveDrivers.map((driver) => (
                   <DriverCard
                     key={driver.id}
                     driver={driver}
                     variant="positive"
                     showScopeTag={scopeFilter === 'all'}
+                    showTechnicalStats={showTechnicalStats}
                   />
                 ))}
               </div>
+            )}
+
+            {positiveDrivers.length > 5 && (
+              <button
+                type="button"
+                onClick={() => setShowAllPositive((v) => !v)}
+                className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1C1C1E] border border-white/[0.08] text-xs text-[#D1D1D6] hover:border-white/[0.2] cursor-pointer"
+              >
+                {showAllPositive ? (
+                  <>
+                    <ChevronUp className="w-3.5 h-3.5" />
+                    Show less
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown className="w-3.5 h-3.5" />
+                    Show all {positiveDrivers.length} positive drivers
+                  </>
+                )}
+              </button>
             )}
           </div>
 
@@ -575,147 +664,161 @@ export function InsightsDashboard({
             <div className="flex items-center justify-between border-b border-white/[0.08] pb-2">
               <span className="text-xs font-semibold uppercase tracking-wider text-[#FF453A] flex items-center gap-1.5">
                 <TrendingDown className="w-3.5 h-3.5" />
-                Top Drains / Suppressors (Reduce)
+                Top Drains &amp; Suppressors (Reduce)
               </span>
               <span className="text-[11px] font-mono tabular-nums text-[#8E8E93]">
-                {negativeDrivers.length} signals
+                {negativeDrivers.length} found
               </span>
             </div>
 
-            {negativeDrivers.length === 0 ? (
+            {visibleNegativeDrivers.length === 0 ? (
               <div className="rounded-lg bg-[#1C1C1E]/50 border border-white/[0.06] p-4 text-xs text-[#8E8E93]">
-                No significant negative suppressors matched this outcome and scope filter yet.
+                No negative drains matched this filter yet.
               </div>
             ) : (
               <div className="space-y-2.5">
-                {negativeDrivers.slice(0, driverLimit).map((driver) => (
+                {visibleNegativeDrivers.map((driver) => (
                   <DriverCard
                     key={driver.id}
                     driver={driver}
                     variant="negative"
                     showScopeTag={scopeFilter === 'all'}
+                    showTechnicalStats={showTechnicalStats}
                   />
                 ))}
               </div>
             )}
+
+            {negativeDrivers.length > 5 && (
+              <button
+                type="button"
+                onClick={() => setShowAllNegative((v) => !v)}
+                className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1C1C1E] border border-white/[0.08] text-xs text-[#D1D1D6] hover:border-white/[0.2] cursor-pointer"
+              >
+                {showAllNegative ? (
+                  <>
+                    <ChevronUp className="w-3.5 h-3.5" />
+                    Show less
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown className="w-3.5 h-3.5" />
+                    Show all {negativeDrivers.length} drains
+                  </>
+                )}
+              </button>
+            )}
           </div>
         </div>
-
-        {(positiveDrivers.length > 8 || negativeDrivers.length > 8) && (
-          <div className="pt-1 flex justify-center">
-            <button
-              type="button"
-              onClick={() => setShowAllDrivers((v) => !v)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1C1C1E] border border-white/[0.08] text-xs text-[#D1D1D6] hover:border-white/[0.2] cursor-pointer"
-            >
-              {showAllDrivers ? (
-                <>
-                  <ChevronUp className="w-3.5 h-3.5" />
-                  Show Top 8 Per Column
-                </>
-              ) : (
-                <>
-                  <ChevronDown className="w-3.5 h-3.5" />
-                  Show All Matching Drivers ({positiveDrivers.length + negativeDrivers.length})
-                </>
-              )}
-            </button>
-          </div>
-        )}
       </section>
 
-      {/* Section 3: Personal Threshold Cliffs (Operating Rules) */}
+      {/* Section 3: Personal Operating Rules (Threshold Cliffs) */}
       <section className="rounded-xl bg-[#141416] border border-white/[0.08] p-5 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div>
             <h2 className="text-sm font-semibold text-[#F5F5F7]">
-              Personal Threshold Cliffs (Operating Rules)
+              Personal Operating Rules
             </h2>
             <p className="text-xs text-[#8E8E93] mt-0.5">
-              Mann-Whitney U step changes across behavioural cutoffs first, followed by seasonal thresholds.
+              Clear day-to-day cutoff points where your recovery or sleep noticeably shifts.
             </p>
           </div>
           <span className="text-xs font-mono tabular-nums text-[#8E8E93]">
-            {sortedCliffs.length} significant cutoffs
+            Showing {visibleCliffs.length} of {sortedCliffs.length} rules
           </span>
         </div>
 
-        {sortedCliffs.length === 0 ? (
+        {visibleCliffs.length === 0 ? (
           <div className="rounded-lg bg-[#1C1C1E]/50 border border-white/[0.06] p-4 text-xs text-[#8E8E93]">
-            No threshold cliffs found for the selected filter.
+            No operating rules found for the selected filter.
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {sortedCliffs.slice(0, cliffLimit).map((cliff) => {
-              const deltaIsGood =
-                cliff.outcomeKey === 'lowest_hr_bpm' ||
-                cliff.outcomeKey === 'sleep_latency_min'
-                  ? cliff.medianDelta < 0
-                  : cliff.medianDelta > 0;
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+            {visibleCliffs.map((cliff) => {
+              const totalDays = cliff.lowN + cliff.highN;
+              const impactColor =
+                Math.abs(cliff.medianDelta) < 0.05
+                  ? 'text-[#8E8E93]'
+                  : cliff.isBeneficialDelta
+                    ? 'text-[#30D158]'
+                    : 'text-[#FF453A]';
+
               return (
                 <div
                   key={cliff.id}
-                  className="rounded-lg bg-[#1C1C1E]/70 border border-white/[0.08] p-4 space-y-2.5"
+                  className="rounded-lg bg-[#1C1C1E]/75 border border-white/[0.08] p-4 space-y-3"
                 >
+                  {/* Top Line */}
                   <div className="flex items-start justify-between gap-2">
                     <div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs font-semibold text-[#F5F5F7]">
-                          {cliff.featureLabel}
-                        </span>
-                        <span
-                          className={cn(
-                            'text-[10px] font-mono px-1.5 py-0.5 rounded border',
-                            cliff.scope === 'behavioural'
-                              ? 'bg-[#0A84FF]/15 text-[#0A84FF] border-[#0A84FF]/30'
-                              : 'bg-[#141416] text-[#8E8E93] border-white/[0.08]',
-                          )}
-                        >
-                          {cliff.scope === 'behavioural' ? 'Behavioural' : 'Seasonal'}
-                        </span>
+                      <div className="text-sm font-semibold text-[#F5F5F7]">
+                        {cliff.featureLabel}
                       </div>
-                      <p className="text-[11px] font-mono text-[#8E8E93] mt-1">
-                        {cliff.thresholdRule}
-                      </p>
+                      <div className="text-[11px] text-[#8E8E93] mt-0.5">
+                        {cliff.comparisonLabel}
+                      </div>
                     </div>
-                    <span
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-[#141416] text-[#D1D1D6] border border-white/[0.08]">
+                        {cliff.timingLabel}
+                      </span>
+                      <span
+                        className={cn(
+                          'text-[10px] font-medium px-2 py-0.5 rounded-full border',
+                          confidenceBadgeStyle(cliff.confidenceLabel),
+                        )}
+                      >
+                        {cliff.confidenceLabel}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Middle Highlight */}
+                  <div className="space-y-1">
+                    <div
                       className={cn(
-                        'text-xs font-mono tabular-nums font-semibold px-2 py-1 rounded-md shrink-0',
-                        deltaIsGood
-                          ? 'bg-[#30D158]/15 text-[#30D158]'
-                          : 'bg-[#FF453A]/15 text-[#FF453A]',
+                        'text-lg font-mono tabular-nums font-semibold tracking-tight',
+                        impactColor,
                       )}
                     >
-                      {formatDeltaWithUnit(cliff.medianDelta, cliff.outcomeUnit)}
-                    </span>
+                      {formatOutcomeDelta(cliff.outcomeKey, cliff.medianDelta)}{' '}
+                      <span className="text-xs font-sans font-medium text-[#D1D1D6]">
+                        {cliff.outcomeLabel}
+                      </span>
+                    </div>
+                    <p className="text-xs text-[#D1D1D6]">{cliff.plainVerdict}</p>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2 pt-2 border-t border-white/[0.06] text-xs font-mono tabular-nums">
-                    <div className="rounded bg-[#141416] px-2.5 py-1.5 border border-white/[0.06]">
-                      <div className="text-[10px] text-[#8E8E93] truncate">
+                  {/* Bottom Comparison Bar */}
+                  <div className="grid grid-cols-2 gap-2 pt-2 border-t border-white/[0.06] text-xs">
+                    <div className="rounded bg-[#141416] px-3 py-2 border border-white/[0.06]">
+                      <div className="text-[11px] text-[#8E8E93] truncate">
                         {cliff.lowBucketLabel}
                       </div>
-                      <div className="text-[#F5F5F7] font-semibold mt-0.5">
-                        {cliff.lowMedian}
-                        {cliff.outcomeUnit ? ` ${cliff.outcomeUnit}` : ''}
+                      <div className="font-mono tabular-nums text-[#F5F5F7] font-semibold mt-0.5">
+                        {formatOutcomeValue(cliff.outcomeKey, cliff.lowMedian)}
                       </div>
                     </div>
-                    <div className="rounded bg-[#141416] px-2.5 py-1.5 border border-white/[0.06]">
-                      <div className="text-[10px] text-[#8E8E93] truncate">
+                    <div className="rounded bg-[#141416] px-3 py-2 border border-white/[0.06]">
+                      <div className="text-[11px] text-[#8E8E93] truncate">
                         {cliff.highBucketLabel}
                       </div>
-                      <div className="text-[#F5F5F7] font-semibold mt-0.5">
-                        {cliff.highMedian}
-                        {cliff.outcomeUnit ? ` ${cliff.outcomeUnit}` : ''}
+                      <div className="font-mono tabular-nums text-[#F5F5F7] font-semibold mt-0.5">
+                        {formatOutcomeValue(cliff.outcomeKey, cliff.highMedian)}
                       </div>
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between text-[11px] font-mono tabular-nums text-[#8E8E93]">
-                    <span>Outcome: {cliff.outcomeLabel}</span>
-                    <span>
-                      n={cliff.lowN} vs {cliff.highN} · p = {formatPValue(cliff.pValue)}
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-[#8E8E93]">
+                    <span className="font-mono tabular-nums">
+                      Based on {totalDays} days
                     </span>
+                    {showTechnicalStats && (
+                      <span className="font-mono tabular-nums">
+                        p = {formatPValue(cliff.pValue)} · n = {cliff.lowN} vs {cliff.highN}
+                      </span>
+                    )}
                   </div>
                 </div>
               );
@@ -723,14 +826,16 @@ export function InsightsDashboard({
           </div>
         )}
 
-        {sortedCliffs.length > 10 && (
+        {sortedCliffs.length > 6 && (
           <div className="pt-1 flex justify-center">
             <button
               type="button"
               onClick={() => setShowAllCliffs((v) => !v)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1C1C1E] border border-white/[0.08] text-xs text-[#D1D1D6] hover:border-white/[0.2] cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-[#1C1C1E] border border-white/[0.08] text-xs text-[#D1D1D6] hover:border-white/[0.2] cursor-pointer"
             >
-              {showAllCliffs ? 'Show Top 10 Cliffs' : `Show All ${sortedCliffs.length} Cliffs`}
+              {showAllCliffs
+                ? 'Show less'
+                : `Show all ${sortedCliffs.length} rules`}
             </button>
           </div>
         )}
@@ -741,18 +846,18 @@ export function InsightsDashboard({
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h2 className="text-sm font-semibold text-[#F5F5F7]">
-              Best 10% vs Worst 10% Days Fingerprint
+              Your Best Days vs. Worst Days
             </h2>
             <p className="text-xs text-[#8E8E93] mt-0.5">
-              Composite recovery and focus decile separation sorted by absolute Cohen&apos;s d effect size.
+              Averages from your top 10% recovery days compared with your bottom 10% days.
             </p>
           </div>
 
           <div className="inline-flex rounded-lg bg-[#1C1C1E] p-0.5 border border-white/[0.08] self-start">
             {(
               [
-                { key: 'all', label: 'All Variables' },
-                { key: 'behavioural', label: 'Behavioural Only' },
+                { key: 'all', label: 'All' },
+                { key: 'behavioural', label: 'Habits Only' },
                 { key: 'environmental', label: 'Seasonal Only' },
               ] as const
             ).map((opt) => (
@@ -776,13 +881,16 @@ export function InsightsDashboard({
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse text-xs">
             <thead>
-              <tr className="border-b border-white/[0.08] text-[11px] font-mono uppercase tracking-wider text-[#8E8E93]">
-                <th className="py-2.5 pr-4">Variable</th>
+              <tr className="border-b border-white/[0.08] text-[11px] uppercase tracking-wider text-[#8E8E93]">
+                <th className="py-2.5 pr-4">Habit or Factor</th>
                 <th className="py-2.5 px-3">Type</th>
-                <th className="py-2.5 px-3 text-right">Best 10% Mean</th>
-                <th className="py-2.5 px-3 text-right">Worst 10% Mean</th>
-                <th className="py-2.5 px-3 text-right">Sample</th>
-                <th className="py-2.5 pl-3 text-right">Cohen&apos;s d</th>
+                <th className="py-2.5 px-3 text-right">Best 10% Days</th>
+                <th className="py-2.5 px-3 text-right">Worst 10% Days</th>
+                <th className="py-2.5 px-3 text-right">Days Compared</th>
+                <th className="py-2.5 pl-3 text-right">Impact Size</th>
+                {showTechnicalStats && (
+                  <th className="py-2.5 pl-3 text-right font-mono">Cohen&apos;s d</th>
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-white/[0.06]">
@@ -794,7 +902,7 @@ export function InsightsDashboard({
                   <td className="py-2.5 px-3">
                     <span
                       className={cn(
-                        'text-[10px] font-mono px-2 py-0.5 rounded border',
+                        'text-[10px] font-medium px-2 py-0.5 rounded-full border',
                         c.scope === 'behavioural'
                           ? 'bg-[#0A84FF]/15 text-[#0A84FF] border-[#0A84FF]/30'
                           : 'bg-[#1C1C1E] text-[#8E8E93] border-white/[0.08]',
@@ -804,22 +912,29 @@ export function InsightsDashboard({
                     </span>
                   </td>
                   <td className="py-2.5 px-3 text-right font-mono tabular-nums text-[#30D158]">
-                    {c.best10Mean.toFixed(2)}
+                    {c.best10Formatted}
                   </td>
                   <td className="py-2.5 px-3 text-right font-mono tabular-nums text-[#FF9F0A]">
-                    {c.worst10Mean.toFixed(2)}
+                    {c.worst10Formatted}
                   </td>
                   <td className="py-2.5 px-3 text-right font-mono tabular-nums text-[#8E8E93]">
-                    n={c.sampleN}
+                    {c.sampleN} days
                   </td>
-                  <td
-                    className={cn(
-                      'py-2.5 pl-3 text-right font-mono tabular-nums font-semibold',
-                      Math.abs(c.effectSizeD) >= 1.0 ? 'text-[#F5F5F7]' : 'text-[#8E8E93]',
-                    )}
-                  >
-                    {formatSigned(c.effectSizeD, 3)}
+                  <td className="py-2.5 pl-3 text-right">
+                    <span
+                      className={cn(
+                        'inline-block text-[10px] font-medium px-2 py-0.5 rounded-full border',
+                        impactSizeBadgeStyle(c.effectSizeLabel),
+                      )}
+                    >
+                      {c.effectSizeLabel}
+                    </span>
                   </td>
+                  {showTechnicalStats && (
+                    <td className="py-2.5 pl-3 text-right font-mono tabular-nums font-semibold text-[#D1D1D6]">
+                      {formatSigned(c.effectSizeD, 3)}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -834,11 +949,11 @@ export function InsightsDashboard({
             <div className="flex items-center gap-2">
               <FlaskConical className="w-4 h-4 text-[#0A84FF]" />
               <h2 className="text-sm font-semibold text-[#F5F5F7]">
-                N-of-1 Self-Experiments
+                Personal 14-Day Experiments
               </h2>
             </div>
             <p className="text-xs text-[#8E8E93] mt-0.5">
-              Structured 14-day personal intervention trials scored nightly against prior baselines.
+              Test one habit change at a time and automatically compare against your prior baseline.
             </p>
           </div>
 
@@ -879,7 +994,7 @@ export function InsightsDashboard({
             className="rounded-xl bg-[#1C1C1E]/80 border border-white/[0.1] p-4 space-y-4"
           >
             <div className="space-y-1.5">
-              <div className="text-[11px] font-mono uppercase tracking-wider text-[#8E8E93]">
+              <div className="text-[11px] font-medium uppercase tracking-wider text-[#8E8E93]">
                 Quick Presets
               </div>
               <div className="flex flex-wrap gap-1.5">
@@ -912,16 +1027,16 @@ export function InsightsDashboard({
 
               <div>
                 <label className="block text-[11px] uppercase tracking-wider text-[#8E8E93] mb-1">
-                  Intervention Feature
+                  Habit to Test
                 </label>
                 <select
                   value={expFeatureKey}
                   onChange={(e) => setExpFeatureKey(e.target.value)}
-                  className="w-full rounded-lg bg-[#141416] border border-white/[0.12] px-3 py-2 text-xs font-mono text-[#F5F5F7] focus:outline-none focus:border-[#0A84FF]"
+                  className="w-full rounded-lg bg-[#141416] border border-white/[0.12] px-3 py-2 text-xs text-[#F5F5F7] focus:outline-none focus:border-[#0A84FF]"
                 >
                   {FEATURE_KEY_OPTIONS.map((f) => (
                     <option key={f.key} value={f.key}>
-                      {f.label} ({f.key})
+                      {f.label}
                     </option>
                   ))}
                 </select>
@@ -930,7 +1045,7 @@ export function InsightsDashboard({
 
             <div>
               <label className="block text-[11px] uppercase tracking-wider text-[#8E8E93] mb-1">
-                Falsifiable Hypothesis
+                What You Expect to Improve
               </label>
               <textarea
                 rows={2}
@@ -943,7 +1058,7 @@ export function InsightsDashboard({
 
             <div className="space-y-1.5">
               <label className="block text-[11px] uppercase tracking-wider text-[#8E8E93]">
-                Target Outcomes
+                Outcomes to Track
               </label>
               <div className="flex flex-wrap gap-1.5">
                 {EXPERIMENT_OUTCOME_OPTIONS.map((opt) => {
@@ -970,7 +1085,7 @@ export function InsightsDashboard({
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className="block text-[11px] uppercase tracking-wider text-[#8E8E93] mb-1">
-                  Start Day
+                  Start Date
                 </label>
                 <input
                   type="date"
@@ -982,7 +1097,7 @@ export function InsightsDashboard({
               </div>
               <div>
                 <label className="block text-[11px] uppercase tracking-wider text-[#8E8E93] mb-1">
-                  End Day
+                  End Date
                 </label>
                 <input
                   type="date"
@@ -994,7 +1109,7 @@ export function InsightsDashboard({
               </div>
               <div>
                 <label className="block text-[11px] uppercase tracking-wider text-[#8E8E93] mb-1">
-                  Baseline Lookback (days)
+                  Baseline Days
                 </label>
                 <input
                   type="number"
@@ -1031,10 +1146,10 @@ export function InsightsDashboard({
         {initialData.experiments.length === 0 ? (
           <div className="rounded-lg bg-[#1C1C1E]/50 border border-white/[0.06] p-6 text-center space-y-1.5">
             <p className="text-xs font-medium text-[#F5F5F7]">
-              No N-of-1 Self-Experiments Logged Yet
+              No Experiments Running Yet
             </p>
             <p className="text-xs text-[#8E8E93]">
-              Click &ldquo;New Experiment&rdquo; above to launch a 14-day intervention trial targeting a behavioural lever.
+              Tap &ldquo;New Experiment&rdquo; above to launch a 14-day test on a controllable habit.
             </p>
           </div>
         ) : (
@@ -1072,10 +1187,10 @@ export function InsightsDashboard({
                 </p>
 
                 <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-white/[0.06] text-[11px]">
-                  <div className="flex flex-wrap items-center gap-1.5 font-mono text-[#8E8E93]">
-                    <span>Feature: {exp.featureKey}</span>
-                    <span>·</span>
-                    <span>Outcomes: {exp.targetOutcomes.join(', ')}</span>
+                  <div className="flex flex-wrap items-center gap-1.5 text-[#8E8E93]">
+                    <span>
+                      Tracking: {exp.targetOutcomes.map((o) => getOutcomeLabel(o)).join(', ')}
+                    </span>
                   </div>
 
                   {exp.status === 'active' && (

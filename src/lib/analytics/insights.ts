@@ -9,170 +9,29 @@ import {
   lifeThresholdCliffs,
 } from '@/db/schema';
 import { isoDaySchema } from '@/lib/life/ingest';
+import {
+  buildDriverTakeaway,
+  classifyFeatureScope,
+  formatFeatureValue,
+  getBeneficialDirection,
+  getConfidenceLabel,
+  getEffectSizeLabel,
+  getFeatureDedupeGroup,
+  getFeatureLabel,
+  getLagLabel,
+  getOutcomeLabel,
+  getOutcomeUnit,
+  getStrengthBand,
+  isOutcomeHigherBetter,
+  translateCliffFields,
+  type AnalyticsCliffItem,
+  type AnalyticsContrastItem,
+  type AnalyticsDriverItem,
+  type DomainCoverageItem,
+  type InsightsPayload,
+} from './insights-labels';
 
-export type FeatureScope = 'behavioural' | 'environmental';
-export type BeneficialDirection = 'beneficial' | 'detrimental';
-
-const ENVIRONMENTAL_FEATURES = new Set<string>([
-  'photoperiod_hours',
-  'uv_max',
-  'temp_mean_c',
-  'humidity_pct',
-  'cloud_cover_pct',
-  'precipitation_mm',
-  'pressure_hpa',
-  'pressure_delta_24h',
-  'pm25',
-  'european_aqi',
-  'is_weekend',
-]);
-
-const LOWER_IS_BETTER_OUTCOMES = new Set<string>([
-  'lowest_hr_bpm',
-  'sleep_latency_min',
-  'tasks_remaining',
-  'physical_soreness',
-]);
-
-export const OUTCOME_UNITS: Record<string, string> = {
-  hrv_avg_ms: 'ms',
-  deep_sleep_min: 'min',
-  rem_sleep_min: 'min',
-  total_sleep_min: 'min',
-  sleep_efficiency_pct: '%',
-  sleep_latency_min: 'min',
-  lowest_hr_bpm: 'bpm',
-  readiness_score: 'pts',
-  sleep_score: 'pts',
-  mental_focus: 'pts',
-  energy: 'pts',
-  mood_calm: 'pts',
-  task_completion_rate: '%',
-  tasks_remaining: 'tasks',
-};
-
-export function classifyFeatureScope(featureKey: string): FeatureScope {
-  return ENVIRONMENTAL_FEATURES.has(featureKey) ? 'environmental' : 'behavioural';
-}
-
-export function getBeneficialDirection(
-  outcomeKey: string,
-  spearmanR: number,
-): BeneficialDirection {
-  const lowerBetter = LOWER_IS_BETTER_OUTCOMES.has(outcomeKey);
-  if (lowerBetter) {
-    return spearmanR <= 0 ? 'beneficial' : 'detrimental';
-  }
-  return spearmanR >= 0 ? 'beneficial' : 'detrimental';
-}
-
-export interface AnalyticsDriverItem {
-  id: number;
-  runId: number;
-  outcomeKey: string;
-  outcomeLabel: string;
-  outcomeUnit: string;
-  featureKey: string;
-  featureLabel: string;
-  scope: FeatureScope;
-  lagDays: number;
-  sampleN: number;
-  spearmanR: number;
-  pValue: number;
-  fdrQValue: number | null;
-  shapImportance: number | null;
-  marginalEffect: number | null;
-  direction: string;
-  beneficialDirection: BeneficialDirection;
-  confidenceTier: string;
-}
-
-export interface AnalyticsCliffItem {
-  id: number;
-  runId: number;
-  outcomeKey: string;
-  outcomeLabel: string;
-  outcomeUnit: string;
-  featureKey: string;
-  featureLabel: string;
-  scope: FeatureScope;
-  thresholdRule: string;
-  lowBucketLabel: string;
-  highBucketLabel: string;
-  lowN: number;
-  highN: number;
-  lowMedian: number;
-  highMedian: number;
-  medianDelta: number;
-  pValue: number;
-}
-
-export interface AnalyticsContrastItem {
-  id: number;
-  runId: number;
-  cohortLabel: string;
-  featureKey: string;
-  featureLabel: string;
-  scope: FeatureScope;
-  best10Mean: number;
-  worst10Mean: number;
-  effectSizeD: number;
-  sampleN: number;
-}
-
-export interface DomainCoverageItem {
-  key: string;
-  label: string;
-  days: number;
-  status: 'active' | 'warming' | 'pending';
-}
-
-export interface ExperimentItem {
-  id: number;
-  name: string;
-  hypothesis: string;
-  featureKey: string;
-  targetOutcomes: string[];
-  startDay: string;
-  endDay: string;
-  baselineDays: number;
-  status: string;
-  verdict: string | null;
-  resultsJson: Record<string, unknown> | null;
-  createdAt: string;
-}
-
-export interface InsightsPayload {
-  latestRun: {
-    id: number;
-    ranAt: string;
-    windowDays: number;
-    matrixDays: number;
-    summaryJson: Record<string, unknown>;
-  } | null;
-  coverage: {
-    totalDays: number;
-    minDay: string | null;
-    maxDay: string | null;
-    domains: DomainCoverageItem[];
-  };
-  drivers: AnalyticsDriverItem[];
-  thresholdCliffs: AnalyticsCliffItem[];
-  groupContrasts: AnalyticsContrastItem[];
-  behavioural: {
-    drivers: AnalyticsDriverItem[];
-    positiveDrivers: AnalyticsDriverItem[];
-    negativeDrivers: AnalyticsDriverItem[];
-    thresholdCliffs: AnalyticsCliffItem[];
-    groupContrasts: AnalyticsContrastItem[];
-  };
-  environmental: {
-    drivers: AnalyticsDriverItem[];
-    thresholdCliffs: AnalyticsCliffItem[];
-    groupContrasts: AnalyticsContrastItem[];
-  };
-  experiments: ExperimentItem[];
-}
+export * from './insights-labels';
 
 function classifyDomainStatus(days: number): DomainCoverageItem['status'] {
   if (days >= 30) return 'active';
@@ -201,7 +60,7 @@ export async function getInsightsData(): Promise<InsightsPayload> {
         COUNT(combined_screen_mins)::int AS screentime_days,
         COUNT(adhd_med_doses)::int AS meds_days,
         COUNT(task_completion_rate)::int AS tasks_days,
-        COUNT(COALESCE(headphone_audio_avg_db, env_audio_avg_db, time_in_daylight_mins, body_mass_kg, workout_mins))::int AS apple_health_days,
+        COUNT(headphone_audio_avg_db)::int AS headphone_audio_days,
         COUNT(caffeine_total_mg)::int AS caffeine_days,
         COUNT(energy)::int AS subjective_days,
         COUNT(spend_total_gbp)::int AS spending_days,
@@ -230,26 +89,41 @@ export async function getInsightsData(): Promise<InsightsPayload> {
     : [[], [], []];
 
   const drivers: AnalyticsDriverItem[] = driverRows
-    .map((r) => ({
-      id: r.id,
-      runId: r.runId,
-      outcomeKey: r.outcomeKey,
-      outcomeLabel: r.outcomeLabel,
-      outcomeUnit: OUTCOME_UNITS[r.outcomeKey] ?? '',
-      featureKey: r.featureKey,
-      featureLabel: r.featureLabel,
-      scope: classifyFeatureScope(r.featureKey),
-      lagDays: r.lagDays,
-      sampleN: r.sampleN,
-      spearmanR: r.spearmanR,
-      pValue: r.pValue,
-      fdrQValue: r.fdrQValue,
-      shapImportance: r.shapImportance,
-      marginalEffect: r.marginalEffect,
-      direction: r.direction,
-      beneficialDirection: getBeneficialDirection(r.outcomeKey, r.spearmanR),
-      confidenceTier: r.confidenceTier,
-    }))
+    .map((r) => {
+      const outcomeLabel = getOutcomeLabel(r.outcomeKey, r.outcomeLabel);
+      const featureLabel = getFeatureLabel(r.featureKey, r.featureLabel);
+      return {
+        id: r.id,
+        runId: r.runId,
+        outcomeKey: r.outcomeKey,
+        outcomeLabel,
+        outcomeUnit: getOutcomeUnit(r.outcomeKey),
+        featureKey: r.featureKey,
+        featureLabel,
+        dedupeGroup: getFeatureDedupeGroup(r.featureKey),
+        scope: classifyFeatureScope(r.featureKey),
+        lagDays: r.lagDays,
+        lagLabel: getLagLabel(r.lagDays),
+        sampleN: r.sampleN,
+        spearmanR: r.spearmanR,
+        pValue: r.pValue,
+        fdrQValue: r.fdrQValue,
+        shapImportance: r.shapImportance,
+        marginalEffect: r.marginalEffect,
+        direction: r.direction,
+        beneficialDirection: getBeneficialDirection(r.outcomeKey, r.spearmanR),
+        strengthLabel: getStrengthBand(r.spearmanR),
+        confidenceLabel: getConfidenceLabel(r.pValue, r.fdrQValue),
+        takeawayText: buildDriverTakeaway(
+          featureLabel,
+          r.outcomeKey,
+          outcomeLabel,
+          r.spearmanR,
+          r.lagDays,
+        ),
+        confidenceTier: r.confidenceTier,
+      };
+    })
     .sort((a, b) => {
       const pDiff = a.pValue - b.pValue;
       if (Math.abs(pDiff) > 1e-9) return pDiff;
@@ -257,25 +131,51 @@ export async function getInsightsData(): Promise<InsightsPayload> {
     });
 
   const thresholdCliffs: AnalyticsCliffItem[] = cliffRows
-    .map((c) => ({
-      id: c.id,
-      runId: c.runId,
-      outcomeKey: c.outcomeKey,
-      outcomeLabel: c.outcomeLabel,
-      outcomeUnit: OUTCOME_UNITS[c.outcomeKey] ?? '',
-      featureKey: c.featureKey,
-      featureLabel: c.featureLabel,
-      scope: classifyFeatureScope(c.featureKey),
-      thresholdRule: c.thresholdRule,
-      lowBucketLabel: c.lowBucketLabel,
-      highBucketLabel: c.highBucketLabel,
-      lowN: c.lowN,
-      highN: c.highN,
-      lowMedian: c.lowMedian,
-      highMedian: c.highMedian,
-      medianDelta: c.medianDelta,
-      pValue: c.pValue,
-    }))
+    .map((c) => {
+      const outcomeLabel = getOutcomeLabel(c.outcomeKey, c.outcomeLabel);
+      const featureLabel = getFeatureLabel(c.featureKey, c.featureLabel);
+      const translated = translateCliffFields({
+        featureKey: c.featureKey,
+        featureLabel,
+        outcomeKey: c.outcomeKey,
+        outcomeLabel,
+        thresholdRule: c.thresholdRule,
+        lowBucketLabel: c.lowBucketLabel,
+        highBucketLabel: c.highBucketLabel,
+        lowMedian: c.lowMedian,
+        highMedian: c.highMedian,
+        medianDelta: c.medianDelta,
+      });
+      const higherBetter = isOutcomeHigherBetter(c.outcomeKey);
+      const isBeneficialDelta = higherBetter
+        ? c.medianDelta > 0
+        : c.medianDelta < 0;
+
+      return {
+        id: c.id,
+        runId: c.runId,
+        outcomeKey: c.outcomeKey,
+        outcomeLabel,
+        outcomeUnit: getOutcomeUnit(c.outcomeKey),
+        featureKey: c.featureKey,
+        featureLabel,
+        scope: classifyFeatureScope(c.featureKey),
+        thresholdRule: c.thresholdRule,
+        timingLabel: translated.timingLabel,
+        comparisonLabel: translated.comparisonLabel,
+        plainVerdict: translated.plainVerdict,
+        confidenceLabel: getConfidenceLabel(c.pValue, null),
+        isBeneficialDelta,
+        lowBucketLabel: translated.lowBucketLabel,
+        highBucketLabel: translated.highBucketLabel,
+        lowN: c.lowN,
+        highN: c.highN,
+        lowMedian: c.lowMedian,
+        highMedian: c.highMedian,
+        medianDelta: c.medianDelta,
+        pValue: c.pValue,
+      };
+    })
     .sort((a, b) => a.pValue - b.pValue || Math.abs(b.medianDelta) - Math.abs(a.medianDelta));
 
   const groupContrasts: AnalyticsContrastItem[] = contrastRows
@@ -284,11 +184,14 @@ export async function getInsightsData(): Promise<InsightsPayload> {
       runId: g.runId,
       cohortLabel: g.cohortLabel,
       featureKey: g.featureKey,
-      featureLabel: g.featureLabel,
+      featureLabel: getFeatureLabel(g.featureKey, g.featureLabel),
       scope: classifyFeatureScope(g.featureKey),
       best10Mean: g.best10Mean,
       worst10Mean: g.worst10Mean,
+      best10Formatted: formatFeatureValue(g.featureKey, g.best10Mean),
+      worst10Formatted: formatFeatureValue(g.featureKey, g.worst10Mean),
       effectSizeD: g.effectSizeD,
+      effectSizeLabel: getEffectSizeLabel(g.effectSizeD),
       sampleN: g.sampleN,
     }))
     .sort((a, b) => Math.abs(b.effectSizeD) - Math.abs(a.effectSizeD));
@@ -301,14 +204,14 @@ export async function getInsightsData(): Promise<InsightsPayload> {
     { key: 'weather', label: 'Weather & AQI', days: num('weather_days') },
     { key: 'comms', label: 'Comms Bandwidth', days: num('comms_days') },
     { key: 'supplements', label: 'Supplements', days: num('supplements_days') },
+    { key: 'spending', label: 'Spending', days: num('spending_days') },
     { key: 'screentime', label: 'Screen Time', days: num('screentime_days') },
-    { key: 'apple_health', label: 'Apple Health', days: num('apple_health_days') },
+    { key: 'headphone_audio', label: 'Headphone Audio', days: num('headphone_audio_days') },
     { key: 'meds', label: 'ADHD Meds', days: num('meds_days') },
     { key: 'tasks', label: 'Reminders Tasks', days: num('tasks_days') },
     { key: 'presence_media', label: 'Presence & Media', days: num('presence_media_days') },
     { key: 'caffeine', label: 'Caffeine Logs', days: num('caffeine_days') },
     { key: 'subjective', label: 'Subjective State', days: num('subjective_days') },
-    { key: 'spending', label: 'Spending', days: num('spending_days') },
   ].map((d) => ({ ...d, status: classifyDomainStatus(d.days) }));
 
   const behaviouralDrivers = drivers.filter((d) => d.scope === 'behavioural');

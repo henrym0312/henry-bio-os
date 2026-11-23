@@ -10,6 +10,7 @@ import {
   Database,
   HeartPulse,
   Moon,
+  PlusCircle,
   Radio,
   ScatterChart,
   SlidersHorizontal,
@@ -28,6 +29,7 @@ export interface ShellStatusProps {
 
 const NAV_ITEMS = [
   { href: '/', label: 'Command Overview', shortLabel: 'Overview', icon: Activity },
+  { href: '/log', label: 'Quick Log', shortLabel: 'Quick Log', icon: PlusCircle },
   { href: '/sleep', label: 'Sleep Lab', shortLabel: 'Sleep', icon: Moon },
   { href: '/cardio', label: 'Cardio & Autonomic', shortLabel: 'Cardio', icon: HeartPulse },
   {
@@ -55,7 +57,7 @@ const NAV_ITEMS = [
 function formatRelativeTime(iso: string | null): string {
   if (!iso) return 'Never';
   const ms = Date.parse(iso);
-  if (Number.isNaN(ms)) return '—';
+  if (Number.isNaN(ms)) return '-';
   const diffSec = Math.max(0, Math.round((Date.now() - ms) / 1000));
   if (diffSec < 60) return `${diffSec}s ago`;
   const diffMin = Math.round(diffSec / 60);
@@ -148,7 +150,7 @@ export function AppShell({
               Ring Battery
             </span>
             <span className="font-mono tabular-nums text-[#F5F5F7]">
-              {status.latestBatteryLevel !== null ? `${status.latestBatteryLevel}%` : '—'}
+              {status.latestBatteryLevel !== null ? `${status.latestBatteryLevel}%` : '-'}
             </span>
           </div>
 
