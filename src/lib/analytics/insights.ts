@@ -124,6 +124,7 @@ export async function getInsightsData(): Promise<InsightsPayload> {
         COUNT(caffeine_total_mg)::int AS caffeine_days,
         COUNT(energy)::int AS subjective_days,
         COUNT(spend_total_gbp)::int AS spending_days,
+        COUNT(calendar_event_count)::int AS calendar_days,
         COUNT(COALESCE(hours_at_home, tv_active_mins, audio_playback_mins))::int AS presence_media_days
       FROM daily_life_matrix
     `),
@@ -350,6 +351,7 @@ export async function getInsightsData(): Promise<InsightsPayload> {
     { key: 'comms', label: 'Comms Bandwidth', days: num('comms_days') },
     { key: 'supplements', label: 'Supplements', days: num('supplements_days') },
     { key: 'spending', label: 'Spending', days: num('spending_days') },
+    { key: 'calendar', label: 'Calendar', days: num('calendar_days') },
     { key: 'screentime', label: 'Screen Time', days: num('screentime_days') },
     { key: 'headphone_audio', label: 'Headphone Audio', days: num('headphone_audio_days') },
     { key: 'meds', label: 'ADHD Meds', days: num('meds_days') },

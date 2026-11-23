@@ -169,6 +169,14 @@ export const FEATURE_META: Record<string, FeatureMeta> = {
   social_bandwidth: { label: 'Social Level', unit: '/3', valueKind: 'decimal1', family: 'subjective' },
   task_completion_rate: { label: 'Task Completion', unit: '%', valueKind: 'int', family: 'tasks' },
   tasks_remaining: { label: 'Unfinished Tasks', singularUnit: 'task', unit: 'tasks', valueKind: 'int', family: 'tasks' },
+  calendar_event_count: { label: 'Calendar Events', singularUnit: 'event', unit: 'events', valueKind: 'int', family: 'calendar' },
+  calendar_scheduled_mins: { label: 'Scheduled Calendar Time', singularUnit: 'min', unit: 'mins', valueKind: 'duration_mins', family: 'calendar' },
+  calendar_early_start: { label: 'Early Morning Start (Before 8:45am)', unit: '', valueKind: 'boolean_rate', family: 'calendar' },
+  calendar_latest_end_hour: { label: 'Latest Calendar Finish', singularUnit: 'hr', unit: 'hrs', valueKind: 'hours', family: 'calendar' },
+  bedtime_drift_mins: { label: 'Bedtime Drift vs 7d Median', singularUnit: 'min', unit: 'mins', valueKind: 'decimal1', family: 'sleep_drift' },
+  waketime_drift_mins: { label: 'Wake Time Drift vs 7d Median', singularUnit: 'min', unit: 'mins', valueKind: 'decimal1', family: 'sleep_drift' },
+  sleep_schedule_drift_mins: { label: 'Sleep Schedule Drift', singularUnit: 'min', unit: 'mins', valueKind: 'decimal1', family: 'sleep_drift' },
+  screen_to_sleep_gap_mins: { label: 'Screen-Off to Sleep Gap', singularUnit: 'min', unit: 'mins', valueKind: 'decimal1', family: 'screen_gap' },
 };
 
 function titleCaseFallback(rawKey: string): string {
@@ -485,6 +493,21 @@ export function translateCliffFields(input: {
       lowLabel = 'Steady / rising';
       highLabel = 'Sharp drop';
       comparisonLabel = 'Steady pressure vs sharp drop (day before)';
+      break;
+    case 'calendar_early_start':
+      lowLabel = '8:45am or later';
+      highLabel = 'Before 8:45am';
+      comparisonLabel = '8:45am+ start vs before 8:45am (day before)';
+      break;
+    case 'sleep_schedule_drift_mins':
+      lowLabel = 'Within 60 mins';
+      highLabel = 'Over 60 mins drift';
+      comparisonLabel = 'Steady schedule vs over 60 mins drift (day before)';
+      break;
+    case 'screen_to_sleep_gap_mins':
+      lowLabel = '30+ mins gap';
+      highLabel = 'Under 30 mins gap';
+      comparisonLabel = '30+ mins screen-free vs under 30 mins (day before)';
       break;
     default:
       break;

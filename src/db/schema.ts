@@ -642,6 +642,15 @@ export const lifeSubjectiveDaily = pgTable('life_subjective_daily', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
+export const lifeCalendarDaily = pgTable('life_calendar_daily', {
+  day: text('day').primaryKey(),
+  calendarEventCount: integer('calendar_event_count').default(0).notNull(),
+  calendarScheduledMins: integer('calendar_scheduled_mins').default(0).notNull(),
+  calendarEarlyStart: boolean('calendar_early_start').default(false).notNull(),
+  calendarLatestEndHour: doublePrecision('calendar_latest_end_hour'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
 // ============================================================================
 // E. HenryLifeOS Pre-Computed Causal Analytics & Experiment Tables
 // ============================================================================

@@ -140,6 +140,8 @@ async function main() {
           SELECT day FROM life_comms_daily
           UNION
           SELECT day FROM life_supplement_adherence
+          UNION
+          SELECT day FROM life_calendar_daily
         ),
         primary_sleep AS (
           SELECT DISTINCT ON (day)
@@ -150,12 +152,70 @@ async function main() {
             total_sleep_duration,
             efficiency,
             latency,
-            lowest_heart_rate
+            lowest_heart_rate,
+            bedtime_start::timestamptz AS bedtime_start_ts,
+            bedtime_end::timestamptz AS bedtime_end_ts
           FROM oura_sleep
           ORDER BY
             day,
             CASE WHEN type = 'long_sleep' THEN 0 ELSE 1 END,
             total_sleep_duration DESC NULLS LAST
+        ),
+        sleep_clock AS (
+          SELECT
+            day,
+            CASE
+              WHEN (
+                EXTRACT(HOUR FROM (bedtime_start_ts AT TIME ZONE 'Europe/London')) * 60.0 +
+                EXTRACT(MINUTE FROM (bedtime_start_ts AT TIME ZONE 'Europe/London')) +
+                EXTRACT(SECOND FROM (bedtime_start_ts AT TIME ZONE 'Europe/London')) / 60.0
+              ) >= 720.0
+              THEN (
+                EXTRACT(HOUR FROM (bedtime_start_ts AT TIME ZONE 'Europe/London')) * 60.0 +
+                EXTRACT(MINUTE FROM (bedtime_start_ts AT TIME ZONE 'Europe/London')) +
+                EXTRACT(SECOND FROM (bedtime_start_ts AT TIME ZONE 'Europe/London')) / 60.0
+              ) - 1440.0
+              ELSE (
+                EXTRACT(HOUR FROM (bedtime_start_ts AT TIME ZONE 'Europe/London')) * 60.0 +
+                EXTRACT(MINUTE FROM (bedtime_start_ts AT TIME ZONE 'Europe/London')) +
+                EXTRACT(SECOND FROM (bedtime_start_ts AT TIME ZONE 'Europe/London')) / 60.0
+              )
+            END AS bed_min_norm,
+            (
+              EXTRACT(HOUR FROM (bedtime_end_ts AT TIME ZONE 'Europe/London')) * 60.0 +
+              EXTRACT(MINUTE FROM (bedtime_end_ts AT TIME ZONE 'Europe/London')) +
+              EXTRACT(SECOND FROM (bedtime_end_ts AT TIME ZONE 'Europe/London')) / 60.0
+            ) AS wake_min_norm
+          FROM primary_sleep
+          WHERE bedtime_start_ts IS NOT NULL AND bedtime_end_ts IS NOT NULL
+        ),
+        sleep_drift AS (
+          SELECT
+            sc.day,
+            CASE
+              WHEN roll.prior_n >= 3
+              THEN ROUND((sc.bed_min_norm - roll.med_bed_min)::numeric, 1)::double precision
+              ELSE NULL
+            END AS bedtime_drift_mins,
+            CASE
+              WHEN roll.prior_n >= 3
+              THEN ROUND((sc.wake_min_norm - roll.med_wake_min)::numeric, 1)::double precision
+              ELSE NULL
+            END AS waketime_drift_mins,
+            CASE
+              WHEN roll.prior_n >= 3
+              THEN ROUND((ABS(sc.bed_min_norm - roll.med_bed_min) + ABS(sc.wake_min_norm - roll.med_wake_min))::numeric, 1)::double precision
+              ELSE NULL
+            END AS sleep_schedule_drift_mins
+          FROM sleep_clock sc
+          LEFT JOIN LATERAL (
+            SELECT
+              COUNT(*)::int AS prior_n,
+              PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY p2.bed_min_norm) AS med_bed_min,
+              PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY p2.wake_min_norm) AS med_wake_min
+            FROM sleep_clock p2
+            WHERE p2.day::date BETWEEN (sc.day::date - 7) AND (sc.day::date - 1)
+          ) roll ON TRUE
         ),
         st_apps_daily AS (
           SELECT
@@ -347,11 +407,42 @@ async function main() {
 
           -- Subjective & Context
           sub.social_bandwidth::double precision AS social_bandwidth,
-          CASE WHEN EXTRACT(ISODOW FROM d.day::date) IN (6, 7) THEN 1 ELSE 0 END AS is_weekend
+          CASE WHEN EXTRACT(ISODOW FROM d.day::date) IN (6, 7) THEN 1 ELSE 0 END AS is_weekend,
+
+          -- Calendar Load
+          cal.calendar_event_count::double precision AS calendar_event_count,
+          cal.calendar_scheduled_mins::double precision AS calendar_scheduled_mins,
+          CASE
+            WHEN cal.day IS NULL THEN NULL
+            WHEN cal.calendar_early_start THEN 1::double precision
+            ELSE 0::double precision
+          END AS calendar_early_start,
+          cal.calendar_latest_end_hour,
+
+          -- Sleep Timing Drift & Screen-Off Gap
+          sd.bedtime_drift_mins,
+          sd.waketime_drift_mins,
+          sd.sleep_schedule_drift_mins,
+          CASE
+            WHEN st.last_active_at IS NOT NULL AND ps_next.bedtime_start_ts IS NOT NULL
+            THEN ROUND(
+              GREATEST(
+                -240.0,
+                LEAST(
+                  480.0,
+                  EXTRACT(EPOCH FROM (ps_next.bedtime_start_ts - st.last_active_at)) / 60.0
+                )
+              )::numeric,
+              1
+            )::double precision
+            ELSE NULL
+          END AS screen_to_sleep_gap_mins
         FROM all_days d
         LEFT JOIN oura_daily_readiness dr ON dr.day = d.day
         LEFT JOIN oura_daily_sleep ds ON ds.day = d.day
         LEFT JOIN primary_sleep ps ON ps.day = d.day
+        LEFT JOIN primary_sleep ps_next ON ps_next.day = to_char(d.day::date + 1, 'YYYY-MM-DD')
+        LEFT JOIN sleep_drift sd ON sd.day = d.day
         LEFT JOIN oura_daily_activity da ON da.day = d.day
         LEFT JOIN oura_daily_stress dst ON dst.day = d.day
         LEFT JOIN daily_task_metrics dtm ON dtm.day = d.day
@@ -368,6 +459,7 @@ async function main() {
         LEFT JOIN life_media_daily lm ON lm.day = d.day
         LEFT JOIN spending_daily sp ON sp.day = d.day
         LEFT JOIN life_subjective_daily sub ON sub.day = d.day
+        LEFT JOIN life_calendar_daily cal ON cal.day = d.day
         ORDER BY d.day ASC
       `,
     },
@@ -391,7 +483,12 @@ async function main() {
       count(emails_total)::int AS comms_n,
       count(temp_mean_c)::int AS weather_n,
       count(hours_at_home)::int AS presence_n,
-      count(audio_playback_mins)::int AS media_n
+      count(audio_playback_mins)::int AS media_n,
+      count(calendar_event_count)::int AS calendar_n,
+      count(bedtime_drift_mins)::int AS bedtime_drift_n,
+      count(waketime_drift_mins)::int AS waketime_drift_n,
+      count(sleep_schedule_drift_mins)::int AS sleep_drift_n,
+      count(screen_to_sleep_gap_mins)::int AS screen_gap_n
     FROM daily_life_matrix
   `;
   const stCount = await sql`SELECT count(*)::int AS count FROM st_daily_summary`;
