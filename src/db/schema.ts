@@ -472,3 +472,172 @@ export const alertCooldowns = pgTable('alert_cooldowns', {
   lastSentAt: timestamp('last_sent_at', { withTimezone: true }).notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
+
+// ============================================================================
+// D. HenryLifeOS Behavioural & Environmental Telemetry Tables
+// ============================================================================
+
+export const lifeCommsDaily = pgTable('life_comms_daily', {
+  day: text('day').primaryKey(),
+  emailsReceivedGmail: integer('emails_received_gmail').default(0).notNull(),
+  emailsSentGmail: integer('emails_sent_gmail').default(0).notNull(),
+  emailsReceivedUni: integer('emails_received_uni').default(0).notNull(),
+  emailsSentUni: integer('emails_sent_uni').default(0).notNull(),
+  emailsReceivedOther: integer('emails_received_other').default(0).notNull(),
+  emailsSentOther: integer('emails_sent_other').default(0).notNull(),
+  imessagesReceived: integer('imessages_received').default(0).notNull(),
+  imessagesSent: integer('imessages_sent').default(0).notNull(),
+  lateCommsCount: integer('late_comms_count').default(0).notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const lifeCaffeineLogs = pgTable(
+  'life_caffeine_logs',
+  {
+    id: text('id').primaryKey(),
+    day: text('day').notNull(),
+    takenAt: timestamp('taken_at', { withTimezone: true }).notNull(),
+    mg: integer('mg').notNull(),
+    source: text('source').notNull(),
+    notes: text('notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_life_caffeine_logs_day').on(table.day),
+    index('idx_life_caffeine_logs_taken_at').on(table.takenAt),
+  ],
+);
+
+export const lifeSupplementAdherence = pgTable('life_supplement_adherence', {
+  day: text('day').primaryKey(),
+  amTaken: boolean('am_taken').default(false).notNull(),
+  amCompletedAt: timestamp('am_completed_at', { withTimezone: true }),
+  pmTaken: boolean('pm_taken').default(false).notNull(),
+  pmCompletedAt: timestamp('pm_completed_at', { withTimezone: true }),
+  creatineMg: integer('creatine_mg').default(0).notNull(),
+  ginkgoMg: integer('ginkgo_mg').default(0).notNull(),
+  ashwagandhaMg: integer('ashwagandha_mg').default(0).notNull(),
+  vitaminDUg: integer('vitamin_d_ug').default(0).notNull(),
+  multivitaminTaken: boolean('multivitamin_taken').default(false).notNull(),
+  vitaminCMg: integer('vitamin_c_mg').default(0).notNull(),
+  zincMg: integer('zinc_mg').default(0).notNull(),
+  magnesiumCitrateMg: integer('magnesium_citrate_mg').default(0).notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const lifeAlcoholLogs = pgTable(
+  'life_alcohol_logs',
+  {
+    id: text('id').primaryKey(),
+    day: text('day').notNull(),
+    loggedAt: timestamp('logged_at', { withTimezone: true }).notNull(),
+    units: doublePrecision('units').notNull(),
+    drinkType: text('drink_type').notNull(),
+    notes: text('notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index('idx_life_alcohol_logs_day').on(table.day)],
+);
+
+export const lifeWeatherDaily = pgTable('life_weather_daily', {
+  day: text('day').primaryKey(),
+  locationKey: text('location_key').notNull(),
+  lat: doublePrecision('lat').notNull(),
+  lon: doublePrecision('lon').notNull(),
+  tempMeanC: doublePrecision('temp_mean_c'),
+  tempMinC: doublePrecision('temp_min_c'),
+  tempMaxC: doublePrecision('temp_max_c'),
+  humidityPct: doublePrecision('humidity_pct'),
+  uvMax: doublePrecision('uv_max'),
+  cloudCoverPct: doublePrecision('cloud_cover_pct'),
+  precipitationMm: doublePrecision('precipitation_mm'),
+  pressureHpa: doublePrecision('pressure_hpa'),
+  pressureDelta24h: doublePrecision('pressure_delta_24h'),
+  pm25: doublePrecision('pm25'),
+  europeanAqi: doublePrecision('european_aqi'),
+  photoperiodHours: doublePrecision('photoperiod_hours'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const lifeAcousticHealthDaily = pgTable('life_acoustic_health_daily', {
+  day: text('day').primaryKey(),
+  envAudioAvgDb: doublePrecision('env_audio_avg_db'),
+  envAudioMaxDb: doublePrecision('env_audio_max_db'),
+  headphoneAudioAvgDb: doublePrecision('headphone_audio_avg_db'),
+  headphoneAudioMins: doublePrecision('headphone_audio_mins'),
+  timeInDaylightMins: doublePrecision('time_in_daylight_mins'),
+  bodyMassKg: doublePrecision('body_mass_kg'),
+  workoutMins: doublePrecision('workout_mins'),
+  rawPayload: jsonb('raw_payload').$type<Record<string, unknown>>().default({}).notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const lifePresenceDaily = pgTable('life_presence_daily', {
+  day: text('day').primaryKey(),
+  hoursAtHome: doublePrecision('hours_at_home'),
+  firstDepartureAt: timestamp('first_departure_at', { withTimezone: true }),
+  lastReturnAt: timestamp('last_return_at', { withTimezone: true }),
+  sleepLocation: text('sleep_location').default('unknown').notNull(),
+  driveMins: integer('drive_mins').default(0).notNull(),
+  driveTrips: integer('drive_trips').default(0).notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const lifeCommuteEvents = pgTable(
+  'life_commute_events',
+  {
+    id: text('id').primaryKey(),
+    day: text('day').notNull(),
+    eventType: text('event_type').notNull(),
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+    durationMins: integer('duration_mins'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_life_commute_events_day').on(table.day),
+    index('idx_life_commute_events_occurred_at').on(table.occurredAt),
+  ],
+);
+
+export const lifeMediaDaily = pgTable('life_media_daily', {
+  day: text('day').primaryKey(),
+  tvActiveMins: integer('tv_active_mins').default(0).notNull(),
+  tvLateMins: integer('tv_late_mins').default(0).notNull(),
+  audioPlaybackMins: integer('audio_playback_mins').default(0).notNull(),
+  musicMins: integer('music_mins').default(0).notNull(),
+  videoMins: integer('video_mins').default(0).notNull(),
+  bedtimeAudioUsed: boolean('bedtime_audio_used').default(false).notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const lifeSpendingTx = pgTable(
+  'life_spending_tx',
+  {
+    id: text('id').primaryKey(),
+    day: text('day').notNull(),
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+    amountGbp: doublePrecision('amount_gbp').notNull(),
+    merchant: text('merchant').notNull(),
+    category: text('category').notNull(),
+    source: text('source').notNull(),
+    isLateSpend: boolean('is_late_spend').default(false).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_life_spending_tx_day').on(table.day),
+    index('idx_life_spending_tx_category').on(table.category),
+  ],
+);
+
+export const lifeSubjectiveDaily = pgTable('life_subjective_daily', {
+  day: text('day').primaryKey(),
+  energy: integer('energy').notNull(),
+  mentalFocus: integer('mental_focus').notNull(),
+  moodCalm: integer('mood_calm').notNull(),
+  physicalSoreness: integer('physical_soreness').notNull(),
+  socialBandwidth: integer('social_bandwidth').notNull(),
+  eventTags: jsonb('event_tags').$type<string[]>().default([]).notNull(),
+  notes: text('notes'),
+  loggedAt: timestamp('logged_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});

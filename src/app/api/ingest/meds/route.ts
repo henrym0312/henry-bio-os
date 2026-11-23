@@ -5,6 +5,7 @@ import { getDb } from '@/db';
 import { medLogs } from '@/db/schema';
 import { resolvePkParams } from '@/lib/analytics/pk';
 import { verifyBearerSecret } from '@/lib/env';
+import { toLondonDay } from '@/lib/life/helpers';
 import { recordSyncLog } from '@/lib/oura/sync';
 
 export const dynamic = 'force-dynamic';
@@ -34,13 +35,6 @@ const directArrayPayloadSchema = z.union([
     doses: z.array(doseRecordSchema),
   }),
 ]);
-
-function extractDay(isoStr: string, explicitDay?: string): string {
-  if (explicitDay) return explicitDay;
-  const match = /^(\d{4}-\d{2}-\d{2})/.exec(isoStr);
-  if (match) return match[1];
-  return new Date(isoStr).toISOString().slice(0, 10);
-}
 
 export async function POST(req: Request) {
   const auth = verifyBearerSecret(req);
@@ -82,7 +76,7 @@ export async function POST(req: Request) {
             drugType: params.drugType,
             mg: params.mg,
             takenAt: parsedDate,
-            day: extractDay(iso, date),
+            day: toLondonDay(parsedDate),
             rawPayload: { source: 'scriptable_medtracker', date, doseId, takenAt: iso },
             updatedAt: now,
           });
@@ -120,7 +114,7 @@ export async function POST(req: Request) {
           drugType: params.drugType,
           mg: params.mg,
           takenAt: parsedDate,
-          day: extractDay(item.takenAt, item.day),
+          day: toLondonDay(parsedDate),
           rawPayload: item as unknown as Record<string, unknown>,
           updatedAt: now,
         });
