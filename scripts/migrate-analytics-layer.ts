@@ -211,6 +211,7 @@ async function main() {
             ROUND(SUM(CASE WHEN category = 'social_pubs' THEN amount_gbp ELSE 0 END)::numeric, 2)::double precision AS spend_social_pubs_gbp,
             SUM(CASE WHEN is_late_spend THEN 1 ELSE 0 END)::integer AS late_spend_count
           FROM life_spending_tx
+          WHERE category != 'bills'
           GROUP BY day
         )
         SELECT

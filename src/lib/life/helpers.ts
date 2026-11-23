@@ -127,6 +127,7 @@ const TAKEAWAY_KEYWORDS = [
   "nando's",
   'chippy',
   'kebab',
+  ', curry ,',
 ];
 
 const GROCERY_KEYWORDS = [
@@ -179,6 +180,17 @@ const BILLS_KEYWORDS = [
   'energy',
   'octopus',
   'water',
+  ', rent ,',
+  'car insurance',
+  'car tax',
+  'lowell portfolio',
+  'tmlegalltd',
+  'student finance',
+];
+
+const TRANSPORT_KEYWORDS = [
+  ', brakes ,',
+  ', car ,',
 ];
 
 const TRANSPORT_PATTERNS: RegExp[] = [
@@ -209,6 +221,7 @@ const RETAIL_KEYWORDS = [
   'halfords',
   'b&q',
   'ikea',
+  ', remarkable ,',
 ];
 
 export function categoriseUkMerchant(merchant: string): SpendCategory {
@@ -228,11 +241,14 @@ export function categoriseUkMerchant(merchant: string): SpendCategory {
   if (SOCIAL_PUB_PATTERNS.some((re) => re.test(m))) {
     return 'social_pubs';
   }
-  // Check bills before retail so "Apple iCloud" maps to bills rather than retail.
+  // Check bills before retail/transport so fixed obligations never inflate discretionary spend.
   if (BILLS_KEYWORDS.some((kw) => m.includes(kw))) {
     return 'bills';
   }
-  if (TRANSPORT_PATTERNS.some((re) => re.test(m))) {
+  if (
+    TRANSPORT_KEYWORDS.some((kw) => m.includes(kw)) ||
+    TRANSPORT_PATTERNS.some((re) => re.test(m))
+  ) {
     return 'transport';
   }
   if (RETAIL_KEYWORDS.some((kw) => m.includes(kw))) {
