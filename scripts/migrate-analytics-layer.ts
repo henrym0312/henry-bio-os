@@ -217,6 +217,16 @@ async function main() {
             WHERE p2.day::date BETWEEN (sc.day::date - 7) AND (sc.day::date - 1)
           ) roll ON TRUE
         ),
+        post_midnight_screen AS (
+          SELECT
+            to_char(h.day - 1, 'YYYY-MM-DD') AS night_day,
+            h.day AS wake_date,
+            h.hour,
+            LEAST(3600, MAX(h.duration_s)) AS active_s
+          FROM st_hourly_activity h
+          WHERE h.hour BETWEEN 0 AND 6 AND h.duration_s > 0
+          GROUP BY h.day, h.hour
+        ),
         st_apps_daily AS (
           SELECT
             to_char(day, 'YYYY-MM-DD') AS day,
@@ -427,10 +437,15 @@ async function main() {
             WHEN st.last_active_at IS NOT NULL AND ps_next.bedtime_start_ts IS NOT NULL
             THEN ROUND(
               GREATEST(
-                -240.0,
+                0.0,
                 LEAST(
                   480.0,
-                  EXTRACT(EPOCH FROM (ps_next.bedtime_start_ts - st.last_active_at)) / 60.0
+                  EXTRACT(
+                    EPOCH FROM (
+                      ps_next.bedtime_start_ts -
+                      GREATEST(st.last_active_at, COALESCE(pm.max_post_midnight_ts, st.last_active_at))
+                    )
+                  ) / 60.0
                 )
               )::numeric,
               1
@@ -447,6 +462,15 @@ async function main() {
         LEFT JOIN oura_daily_stress dst ON dst.day = d.day
         LEFT JOIN daily_task_metrics dtm ON dtm.day = d.day
         LEFT JOIN st_daily_summary st ON to_char(st.day, 'YYYY-MM-DD') = d.day
+        LEFT JOIN LATERAL (
+          SELECT
+            MAX(
+              (((to_char(pms.wake_date, 'YYYY-MM-DD') || ' 00:00:00')::timestamp + (pms.hour * interval '1 hour') + (pms.active_s * interval '1 second')) AT TIME ZONE 'Europe/London')
+            ) AS max_post_midnight_ts
+          FROM post_midnight_screen pms
+          WHERE pms.night_day = d.day
+            AND (((to_char(pms.wake_date, 'YYYY-MM-DD') || ' 00:00:00')::timestamp + (pms.hour * interval '1 hour')) AT TIME ZONE 'Europe/London') <= ps_next.bedtime_start_ts
+        ) pm ON TRUE
         LEFT JOIN st_apps_daily sta ON sta.day = d.day
         LEFT JOIN meds_daily med ON med.day = d.day
         LEFT JOIN life_supplement_adherence sup ON sup.day = d.day

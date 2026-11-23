@@ -54,6 +54,7 @@ export const SCREEN_TIME_FEATURES = new Set<string>([
   'context_switches',
   'micro_checks',
   'deep_work_mins',
+  'screen_to_sleep_gap_mins',
 ]);
 
 export const SUPPLEMENT_FEATURES = new Set<string>([
@@ -194,8 +195,13 @@ export function pluraliseUnit(
 }
 
 export function formatDayCountPhrase(days: number): string {
-  const rounded = Math.round(days);
+  const rounded = Math.max(0, Math.round(Number(days) || 0));
   return `${rounded} ${rounded === 1 ? 'day' : 'days'}`;
+}
+
+export function formatCoverageDaysBadge(days: number): string {
+  const clean = Math.max(0, Math.round(Number(days) || 0));
+  return `${clean}d`;
 }
 
 export function getOutcomeLabel(outcomeKey: string, fallback?: string): string {
@@ -245,11 +251,14 @@ export function getSampleStageLabel(sampleN: number): SampleStageLabel {
 
 export function getStrengthBand(
   spearmanR: number,
-  sampleN = 60,
+  sampleN: number,
 ): StrengthBand {
   const absR = Math.abs(spearmanR);
   if (sampleN < 25) return 'Mild';
-  if (absR >= 0.45 && sampleN >= 45) return 'Strong';
+  if (sampleN < 45) {
+    return absR >= 0.3 ? 'Moderate' : 'Mild';
+  }
+  if (absR >= 0.45) return 'Strong';
   if (absR >= 0.3) return 'Moderate';
   return 'Mild';
 }
@@ -311,6 +320,9 @@ export function formatMinutesHm(totalMins: number): string {
   const abs = Math.abs(rounded);
   const h = Math.floor(abs / 60);
   const m = abs % 60;
+  if (m === 0) {
+    return `${sign}${h} ${h === 1 ? 'hr' : 'hrs'}`;
+  }
   return `${sign}${h}h ${m}m`;
 }
 
@@ -324,7 +336,7 @@ export function formatMetricNumber(val: number, decimals = 1): string {
 export function formatFeatureValue(featureKey: string, value: number): string {
   const meta = FEATURE_META[featureKey];
   if (!meta) {
-    return formatMetricNumber(value, 1);
+    return value.toFixed(1);
   }
   if (meta.valueKind === 'duration_mins') {
     return formatMinutesHm(value);
@@ -348,7 +360,7 @@ export function formatFeatureValue(featureKey: string, value: number): string {
       : meta.unit;
     return `${rounded} ${unit}`;
   }
-  const formatted = formatMetricNumber(value, 1);
+  const formatted = value.toFixed(1);
   if (!meta.unit) return formatted;
   const numVal = Number(formatted);
   const unit = meta.singularUnit
@@ -387,6 +399,15 @@ export function formatOutcomeDelta(outcomeKey: string, delta: number): string {
   return `${sign}${numStr} ${resolvedUnit}`;
 }
 
+const BINARY_FEATURE_SUBJECTS: Record<string, string> = {
+  am_pills_taken: 'Taking AM Supplements',
+  pm_pills_taken: 'Taking PM Supplements',
+  calendar_early_start: 'Having an early start before 8:45am',
+  is_weekend: 'Being on a weekend',
+  is_away_sleep: 'Sleeping away from home',
+  bedtime_audio_used: 'Using audio before sleep',
+};
+
 export function buildDriverTakeaway(input: {
   featureKey: string;
   featureLabel: string;
@@ -400,18 +421,30 @@ export function buildDriverTakeaway(input: {
   takeawayText: string;
   observationalCaveat: string | null;
 } {
-  const timing =
-    input.lagDays === 0
-      ? 'on the same day'
-      : input.lagDays === 1
-        ? 'next day'
-        : `${input.lagDays} days later`;
   const effectDirection = input.spearmanR >= 0 ? 'higher' : 'lower';
+  const binarySubject = BINARY_FEATURE_SUBJECTS[input.featureKey];
 
-  let base =
-    input.outcomeKey === 'lowest_hr_bpm'
-      ? `Higher ${input.featureLabel} is linked to ${effectDirection} ${input.outcomeLabel} ${timing}.`
-      : `Higher ${input.featureLabel} is linked to ${effectDirection} ${timing} ${input.outcomeLabel}.`;
+  let base: string;
+  if (binarySubject) {
+    const binaryTiming =
+      input.lagDays === 0
+        ? 'on the same day'
+        : input.lagDays === 1
+          ? 'on the day before'
+          : `${input.lagDays} days earlier`;
+    base = `${binarySubject} ${binaryTiming} is linked to ${effectDirection} ${input.outcomeLabel}.`;
+  } else {
+    const timing =
+      input.lagDays === 0
+        ? 'on the same day'
+        : input.lagDays === 1
+          ? 'next day'
+          : `${input.lagDays} days later`;
+    base =
+      input.outcomeKey === 'lowest_hr_bpm'
+        ? `Higher ${input.featureLabel} is linked to ${effectDirection} ${input.outcomeLabel} ${timing}.`
+        : `Higher ${input.featureLabel} is linked to ${effectDirection} ${timing} ${input.outcomeLabel}.`;
+  }
 
   if (input.sampleN < 45) {
     base = `${base} Early sample (<45 days); treat as preliminary.`;

@@ -22,6 +22,7 @@ import {
   updateExperimentStatusAction,
 } from '@/app/insights/actions';
 import {
+  formatCoverageDaysBadge,
   formatDayCountPhrase,
   formatOutcomeDelta,
   formatOutcomeValue,
@@ -821,7 +822,7 @@ export function InsightsDashboard({
               </span>
               <span
                 className={cn(
-                  'text-xs font-mono font-semibold shrink-0 whitespace-nowrap',
+                  'text-xs font-sans tabular-nums font-semibold shrink-0 whitespace-nowrap',
                   domain.status === 'active'
                     ? 'text-[#30D158]'
                     : domain.status === 'warming'
@@ -829,7 +830,7 @@ export function InsightsDashboard({
                       : 'text-[#8E8E93]',
                 )}
               >
-                {`${domain.days}d`}
+                {formatCoverageDaysBadge(domain.days)}
               </span>
             </div>
           ))}
