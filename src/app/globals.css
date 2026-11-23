@@ -31,3 +31,7 @@ body {
 .tabular-nums {
   font-variant-numeric: tabular-nums;
 }
+
+.font-mono {
+  font-variant-numeric: tabular-nums slashed-zero;
+}

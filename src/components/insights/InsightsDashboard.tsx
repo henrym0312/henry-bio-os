@@ -1,8 +1,10 @@
 'use client';
 
+import Link from 'next/link';
 import { useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import {
+  ArrowRight,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
@@ -20,9 +22,12 @@ import {
   updateExperimentStatusAction,
 } from '@/app/insights/actions';
 import {
+  formatDayCountPhrase,
   formatOutcomeDelta,
   formatOutcomeValue,
   getOutcomeLabel,
+  pluraliseUnit,
+  selectHighlightDrivers,
   type AnalyticsCliffItem,
   type AnalyticsContrastItem,
   type AnalyticsDriverItem,
@@ -30,6 +35,7 @@ import {
   type EffectSizeLabel,
   type FeatureScope,
   type InsightsPayload,
+  type SampleStageLabel,
   type StrengthBand,
 } from '@/lib/analytics/insights-labels';
 import { cn } from '@/lib/utils';
@@ -64,6 +70,7 @@ const FEATURE_KEY_OPTIONS = [
   { key: 'spend_social_pubs_gbp', label: 'Pub & Social Spending' },
   { key: 'am_pills_taken', label: 'AM Supplements' },
   { key: 'pm_pills_taken', label: 'PM Supplements' },
+  { key: 'creatine_mg', label: 'Daily Creatine' },
   { key: 'time_in_daylight_mins', label: 'Time Outside in Daylight' },
   { key: 'bedtime_caffeine_mg', label: 'Caffeine Left at Bedtime' },
   { key: 'workout_mins', label: 'Exercise Time' },
@@ -82,7 +89,7 @@ interface ExperimentPreset {
 
 const EXPERIMENT_PRESETS: ExperimentPreset[] = [
   {
-    label: 'Cap Messages After 9pm to 10 or Fewer',
+    label: 'Cap Messages After 9pm (<= 10)',
     name: 'Cap Messages After 9pm (<= 10)',
     hypothesis:
       'Keeping messaging and email activity after 9pm to 10 messages or fewer lowers evening alertness before bed, helping overnight HRV recovery and resting heart rate.',
@@ -168,6 +175,16 @@ function confidenceBadgeStyle(label: ConfidenceLabel): string {
   return 'bg-[#141416] text-[#8E8E93] border-white/[0.08]';
 }
 
+function sampleStageBadgeStyle(stage: SampleStageLabel): string {
+  if (stage === 'Early (<45d)') {
+    return 'bg-[#FF9F0A]/15 text-[#FF9F0A] border-[#FF9F0A]/30';
+  }
+  if (stage === 'Building') {
+    return 'bg-[#0A84FF]/10 text-[#0A84FF] border-[#0A84FF]/25';
+  }
+  return 'bg-[#141416] text-[#8E8E93] border-white/[0.08]';
+}
+
 function strengthBadgeStyle(strength: StrengthBand, positive: boolean): string {
   if (strength === 'Strong') {
     return positive
@@ -194,22 +211,27 @@ function contrastScopeBadge(scope: FeatureScope): string {
   return scope === 'environmental' ? 'Seasonal' : 'Habit';
 }
 
-function selectHighlightDrivers(
-  list: AnalyticsDriverItem[],
+function selectHighlightCliffs(
+  list: AnalyticsCliffItem[],
   limit: number,
-): AnalyticsDriverItem[] {
-  const picked: AnalyticsDriverItem[] = [];
-  const seenGroupOutcome = new Set<string>();
-  for (const item of list) {
-    const key = `${item.outcomeKey}|${item.dedupeGroup}`;
-    if (seenGroupOutcome.has(key)) continue;
-    seenGroupOutcome.add(key);
+  uniqueHabitsOnly: boolean,
+): AnalyticsCliffItem[] {
+  const nonZero = list.filter((c) => Math.abs(c.medianDelta) >= 0.1);
+  const pool = nonZero.length > 0 ? nonZero : list;
+  if (!uniqueHabitsOnly) {
+    return pool.slice(0, limit);
+  }
+  const picked: AnalyticsCliffItem[] = [];
+  const seenFeatures = new Set<string>();
+  for (const item of pool) {
+    if (seenFeatures.has(item.featureKey)) continue;
+    seenFeatures.add(item.featureKey);
     picked.push(item);
     if (picked.length >= limit) break;
   }
   if (picked.length < limit) {
     const pickedIds = new Set(picked.map((p) => p.id));
-    for (const item of list) {
+    for (const item of pool) {
       if (pickedIds.has(item.id)) continue;
       picked.push(item);
       if (picked.length >= limit) break;
@@ -218,13 +240,51 @@ function selectHighlightDrivers(
   return picked;
 }
 
-function selectHighlightCliffs(
-  list: AnalyticsCliffItem[],
-  limit: number,
-): AnalyticsCliffItem[] {
-  const nonZero = list.filter((c) => Math.abs(c.medianDelta) >= 0.1);
-  const pool = nonZero.length >= limit ? nonZero : list;
-  return pool.slice(0, limit);
+function buildTrialDefaults(input: {
+  featureKey: string;
+  featureLabel: string;
+  outcomeKey: string;
+  outcomeLabel: string;
+  comparisonLabel?: string;
+}): {
+  name: string;
+  hypothesis: string;
+  featureKey: string;
+  targetOutcomes: string[];
+} {
+  if (input.featureKey === 'late_comms_count') {
+    return {
+      name: 'Cap Messages After 9pm (<= 10)',
+      hypothesis:
+        'Keeping evening messages after 9pm at 10 or fewer will protect overnight HRV (Recovery) and lower Resting Heart Rate.',
+      featureKey: input.featureKey,
+      targetOutcomes: ['hrv_avg_ms', 'lowest_hr_bpm', 'readiness_score'],
+    };
+  }
+  if (input.featureKey === 'spend_social_pubs_gbp') {
+    return {
+      name: 'Zero Pub & Social Spend Weekdays',
+      hypothesis: `Eliminating weekday pub and social outings for 14 days will lower Resting Heart Rate and lift next-day ${input.outcomeLabel}.`,
+      featureKey: input.featureKey,
+      targetOutcomes: ['lowest_hr_bpm', 'readiness_score', 'hrv_avg_ms'],
+    };
+  }
+  if (input.featureKey === 'late_night_screen_mins') {
+    return {
+      name: 'No Screens After 10pm',
+      hypothesis: `Capping late-night screen time to 30 mins or less will improve ${input.outcomeLabel} and deep sleep consistency.`,
+      featureKey: input.featureKey,
+      targetOutcomes: ['hrv_avg_ms', 'deep_sleep_min', 'sleep_efficiency_pct'],
+    };
+  }
+  return {
+    name: `14-Day ${input.featureLabel} Test`,
+    hypothesis: input.comparisonLabel
+      ? `Testing ${input.featureLabel} (${input.comparisonLabel}) over 14 days to verify its direct effect on ${input.outcomeLabel}.`
+      : `Modifying ${input.featureLabel} for 14 days against baseline to test its effect on ${input.outcomeLabel}.`,
+    featureKey: input.featureKey,
+    targetOutcomes: [input.outcomeKey],
+  };
 }
 
 function DriverCard({
@@ -232,16 +292,18 @@ function DriverCard({
   variant,
   showScopeTag,
   showTechnicalStats,
+  onStartTrial,
 }: {
   driver: AnalyticsDriverItem;
   variant: 'positive' | 'negative';
   showScopeTag: boolean;
   showTechnicalStats: boolean;
+  onStartTrial: (driver: AnalyticsDriverItem) => void;
 }) {
   const isPositive = variant === 'positive';
 
   return (
-    <div className="rounded-lg bg-[#1C1C1E]/75 border border-white/[0.08] p-4 space-y-2.5">
+    <div className="rounded-lg bg-[#1C1C1E]/75 border border-white/[0.08] p-3.5 space-y-2">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="text-sm font-semibold text-[#F5F5F7]">
@@ -252,13 +314,13 @@ function DriverCard({
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center justify-end gap-1.5 shrink-0">
+        <div className="flex flex-wrap items-center justify-end gap-1 shrink-0">
           {showScopeTag && (
             <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-[#141416] border border-white/[0.08] text-[#8E8E93]">
               {driver.scope === 'environmental' ? 'Weather' : 'Habit'}
             </span>
           )}
-          <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-[#0A84FF]/15 text-[#0A84FF] border border-[#0A84FF]/25">
+          <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-[#0A84FF]/15 text-[#0A84FF] border border-[#0A84FF]/25 whitespace-nowrap">
             {driver.lagLabel}
           </span>
         </div>
@@ -268,11 +330,17 @@ function DriverCard({
         {driver.takeawayText}
       </p>
 
+      {driver.observationalCaveat && (
+        <div className="rounded-md bg-[#FF9F0A]/10 border border-[#FF9F0A]/25 px-2.5 py-1.5 text-[11px] text-[#FF9F0A]">
+          {driver.observationalCaveat}
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-white/[0.06] text-[11px]">
         <div className="flex flex-wrap items-center gap-1.5">
           <span
             className={cn(
-              'px-2 py-0.5 rounded-full border font-medium',
+              'px-2 py-0.5 rounded-full border font-medium whitespace-nowrap',
               strengthBadgeStyle(driver.strengthLabel, isPositive),
             )}
           >
@@ -280,21 +348,42 @@ function DriverCard({
           </span>
           <span
             className={cn(
-              'px-2 py-0.5 rounded-full border font-medium',
+              'px-2 py-0.5 rounded-full border font-medium whitespace-nowrap',
               confidenceBadgeStyle(driver.confidenceLabel),
             )}
           >
             {driver.confidenceLabel}
           </span>
+          {driver.isEarlySample && (
+            <span
+              className={cn(
+                'px-2 py-0.5 rounded-full border font-medium whitespace-nowrap',
+                sampleStageBadgeStyle(driver.sampleStage),
+              )}
+            >
+              {driver.sampleStage}
+            </span>
+          )}
         </div>
 
-        <span className="text-[#8E8E93] font-mono tabular-nums">
-          Based on {driver.sampleN} days
-        </span>
+        <div className="flex items-center gap-2.5">
+          <span className="text-[#8E8E93] font-mono whitespace-nowrap">
+            Based on {formatDayCountPhrase(driver.sampleN)}
+          </span>
+          {driver.scope === 'behavioural' && (
+            <button
+              type="button"
+              onClick={() => onStartTrial(driver)}
+              className="px-2 py-0.5 rounded bg-[#0A84FF]/15 text-[#0A84FF] border border-[#0A84FF]/30 hover:bg-[#0A84FF]/25 text-[11px] font-medium whitespace-nowrap transition-colors cursor-pointer"
+            >
+              Start 14-Day Trial
+            </button>
+          )}
+        </div>
       </div>
 
       {showTechnicalStats && (
-        <div className="pt-2 border-t border-white/[0.06] text-[11px] font-mono tabular-nums text-[#8E8E93] flex flex-wrap items-center gap-x-3 gap-y-1">
+        <div className="pt-1.5 border-t border-white/[0.06] text-[11px] font-mono text-[#8E8E93] flex flex-wrap items-center gap-x-3 gap-y-1">
           <span>r = {formatSigned(driver.spearmanR, 3)}</span>
           <span>p = {formatPValue(driver.pValue)}</span>
           {driver.fdrQValue !== null && (
@@ -318,6 +407,7 @@ export function InsightsDashboard({
   const router = useRouter();
   const [outcomeFilter, setOutcomeFilter] = useState<string>('all');
   const [scopeFilter, setScopeFilter] = useState<ScopeFilter>('behavioural');
+  const [uniqueHabitsOnly, setUniqueHabitsOnly] = useState(true);
   const [showTechnicalStats, setShowTechnicalStats] = useState(false);
   const [showAllPositive, setShowAllPositive] = useState(false);
   const [showAllNegative, setShowAllNegative] = useState(false);
@@ -349,7 +439,7 @@ export function InsightsDashboard({
   }, [initialData.drivers, scopeFilter, outcomeFilter]);
 
   const positiveDrivers = useMemo(
-    () => filteredDrivers.filter((d) => d.beneficialDirection === 'beneficial'),
+    () => filteredDrivers.filter((d) => d.isPositiveEligible),
     [filteredDrivers],
   );
   const negativeDrivers = useMemo(
@@ -358,12 +448,19 @@ export function InsightsDashboard({
   );
 
   const visiblePositiveDrivers = useMemo(
-    () => (showAllPositive ? positiveDrivers : selectHighlightDrivers(positiveDrivers, 5)),
-    [positiveDrivers, showAllPositive],
+    () =>
+      showAllPositive
+        ? selectHighlightDrivers(positiveDrivers, positiveDrivers.length, false)
+        : selectHighlightDrivers(positiveDrivers, 5, uniqueHabitsOnly),
+    [positiveDrivers, showAllPositive, uniqueHabitsOnly],
   );
+
   const visibleNegativeDrivers = useMemo(
-    () => (showAllNegative ? negativeDrivers : selectHighlightDrivers(negativeDrivers, 5)),
-    [negativeDrivers, showAllNegative],
+    () =>
+      showAllNegative
+        ? selectHighlightDrivers(negativeDrivers, negativeDrivers.length, false)
+        : selectHighlightDrivers(negativeDrivers, 5, uniqueHabitsOnly),
+    [negativeDrivers, showAllNegative, uniqueHabitsOnly],
   );
 
   const sortedCliffs = useMemo(() => {
@@ -381,8 +478,11 @@ export function InsightsDashboard({
   }, [initialData.thresholdCliffs, outcomeFilter, scopeFilter]);
 
   const visibleCliffs = useMemo(
-    () => (showAllCliffs ? sortedCliffs : selectHighlightCliffs(sortedCliffs, 6)),
-    [sortedCliffs, showAllCliffs],
+    () =>
+      showAllCliffs
+        ? sortedCliffs
+        : selectHighlightCliffs(sortedCliffs, 6, uniqueHabitsOnly),
+    [sortedCliffs, showAllCliffs, uniqueHabitsOnly],
   );
 
   const filteredContrasts = useMemo<AnalyticsContrastItem[]>(() => {
@@ -390,15 +490,36 @@ export function InsightsDashboard({
     return initialData.groupContrasts.filter((c) => c.scope === contrastScope);
   }, [initialData.groupContrasts, contrastScope]);
 
-  const applyPreset = (preset: ExperimentPreset) => {
-    setExpName(preset.name);
-    setExpHypothesis(preset.hypothesis);
-    setExpFeatureKey(preset.featureKey);
-    setExpOutcomes(preset.targetOutcomes);
+  const openTrialFormWith = (suggestion: {
+    name: string;
+    hypothesis: string;
+    featureKey: string;
+    targetOutcomes: string[];
+  }) => {
     const today = todayLondonIso();
+    setExpName(suggestion.name);
+    setExpHypothesis(suggestion.hypothesis);
+    setExpFeatureKey(suggestion.featureKey);
+    setExpOutcomes(suggestion.targetOutcomes);
     setExpStartDay(today);
     setExpEndDay(addDaysIso(today, 13));
     setFormError(null);
+    setFormSuccess(null);
+    setFormOpen(true);
+    if (typeof document !== 'undefined') {
+      document
+        .getElementById('experiments-section')
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+
+  const applyPreset = (preset: ExperimentPreset) => {
+    openTrialFormWith({
+      name: preset.name,
+      hypothesis: preset.hypothesis,
+      featureKey: preset.featureKey,
+      targetOutcomes: preset.targetOutcomes,
+    });
   };
 
   const toggleOutcomeTarget = (key: string) => {
@@ -454,8 +575,14 @@ export function InsightsDashboard({
     });
   };
 
+  const { todayScoreboard, recentShift } = initialData;
+  const pillsStatusText =
+    todayScoreboard.amPillsTaken === null && todayScoreboard.pmPillsTaken === null
+      ? 'Pending sync'
+      : `AM ${todayScoreboard.amPillsTaken ? 'Done' : 'Pending'} / PM ${todayScoreboard.pmPillsTaken ? 'Done' : 'Pending'}`;
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Header */}
       <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-3">
         <div>
@@ -467,12 +594,12 @@ export function InsightsDashboard({
           </div>
           <p className="text-xs text-[#8E8E93] mt-1">
             Updated {formatLondonTimestamp(initialData.latestRun?.ranAt ?? null)} · Rolling{' '}
-            <span className="font-mono tabular-nums text-[#D1D1D6]">
+            <span className="font-mono text-[#D1D1D6]">
               {initialData.latestRun?.windowDays ?? 120}-day
             </span>{' '}
             analysis across{' '}
-            <span className="font-mono tabular-nums text-[#D1D1D6]">
-              {initialData.coverage.totalDays} days
+            <span className="font-mono text-[#D1D1D6]">
+              {formatDayCountPhrase(initialData.coverage.totalDays)}
             </span>{' '}
             of personal history
           </p>
@@ -496,8 +623,165 @@ export function InsightsDashboard({
         </button>
       </div>
 
-      {/* Section 1: Telemetry Coverage Strip */}
+      {/* Today's Habit Check */}
       <section className="rounded-xl bg-[#141416] border border-white/[0.08] p-4 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-[#F5F5F7]">
+            Today&apos;s Habit Check
+          </h2>
+          <span className="text-[11px] font-mono text-[#8E8E93]">
+            {todayScoreboard.day} (London)
+          </span>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+          {/* Messages After 9pm */}
+          <div className="rounded-lg bg-[#1C1C1E]/75 border border-white/[0.08] px-3 py-2.5">
+            <div className="text-[11px] text-[#8E8E93]">Messages After 9pm</div>
+            <div
+              className={cn(
+                'text-sm font-mono font-semibold mt-0.5 whitespace-nowrap',
+                todayScoreboard.lateCommsCount === null
+                  ? 'text-[#8E8E93]'
+                  : todayScoreboard.lateCommsCount > 10
+                    ? 'text-[#FF453A]'
+                    : 'text-[#30D158]',
+              )}
+            >
+              {todayScoreboard.lateCommsCount !== null
+                ? `${todayScoreboard.lateCommsCount} ${pluraliseUnit(todayScoreboard.lateCommsCount, 'msg', 'msgs')}`
+                : 'Pending'}
+            </div>
+          </div>
+
+          {/* Caffeine at 11pm */}
+          <div className="rounded-lg bg-[#1C1C1E]/75 border border-white/[0.08] px-3 py-2.5">
+            <div className="text-[11px] text-[#8E8E93]">Caffeine at 11pm</div>
+            <div
+              className={cn(
+                'text-sm font-mono font-semibold mt-0.5 whitespace-nowrap',
+                todayScoreboard.bedtimeCaffeineMg > 50
+                  ? 'text-[#FF9F0A]'
+                  : 'text-[#30D158]',
+              )}
+            >
+              {Math.round(todayScoreboard.bedtimeCaffeineMg)} mg
+            </div>
+          </div>
+
+          {/* Discretionary Spend */}
+          <div className="rounded-lg bg-[#1C1C1E]/75 border border-white/[0.08] px-3 py-2.5">
+            <div className="text-[11px] text-[#8E8E93]">Discretionary Spend</div>
+            <div className="text-sm font-mono font-semibold text-[#F5F5F7] mt-0.5 whitespace-nowrap">
+              {todayScoreboard.spendTotalGbp !== null
+                ? `£${todayScoreboard.spendTotalGbp.toFixed(2)}`
+                : 'No CSV today'}
+            </div>
+          </div>
+
+          {/* Pub & Social Spend */}
+          <div className="rounded-lg bg-[#1C1C1E]/75 border border-white/[0.08] px-3 py-2.5">
+            <div className="text-[11px] text-[#8E8E93]">Pub &amp; Social Spend</div>
+            <div
+              className={cn(
+                'text-sm font-mono font-semibold mt-0.5 whitespace-nowrap',
+                todayScoreboard.spendSocialPubsGbp && todayScoreboard.spendSocialPubsGbp > 0
+                  ? 'text-[#FF9F0A]'
+                  : 'text-[#F5F5F7]',
+              )}
+            >
+              {todayScoreboard.spendSocialPubsGbp !== null
+                ? `£${todayScoreboard.spendSocialPubsGbp.toFixed(2)}`
+                : 'No CSV today'}
+            </div>
+          </div>
+
+          {/* AM / PM Pills */}
+          <div className="rounded-lg bg-[#1C1C1E]/75 border border-white/[0.08] px-3 py-2.5">
+            <div className="text-[11px] text-[#8E8E93]">AM / PM Pills</div>
+            <div
+              className={cn(
+                'text-xs font-mono font-semibold mt-1 whitespace-nowrap',
+                todayScoreboard.amPillsTaken && todayScoreboard.pmPillsTaken
+                  ? 'text-[#30D158]'
+                  : 'text-[#D1D1D6]',
+              )}
+            >
+              {pillsStatusText}
+            </div>
+          </div>
+
+          {/* Daily Check-In */}
+          <Link
+            href="/log"
+            className={cn(
+              'rounded-lg px-3 py-2.5 border transition-colors flex flex-col justify-between',
+              todayScoreboard.checkInLogged
+                ? 'bg-[#30D158]/[0.08] border-[#30D158]/30 hover:border-[#30D158]/50'
+                : 'bg-[#0A84FF]/15 border-[#0A84FF]/35 hover:bg-[#0A84FF]/25',
+            )}
+          >
+            <div className="text-[11px] text-[#D1D1D6]">Daily Check-In</div>
+            <div
+              className={cn(
+                'text-xs font-semibold mt-0.5 flex items-center justify-between gap-1 whitespace-nowrap',
+                todayScoreboard.checkInLogged ? 'text-[#30D158]' : 'text-[#0A84FF]',
+              )}
+            >
+              <span>{todayScoreboard.checkInLogged ? 'Logged today' : 'Log now (10s)'}</span>
+              <ArrowRight className="w-3.5 h-3.5 shrink-0" />
+            </div>
+          </Link>
+        </div>
+      </section>
+
+      {/* Last 14 Days vs. Previous 30 Days Shift */}
+      <section className="rounded-xl bg-[#141416] border border-white/[0.08] p-4 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-[#F5F5F7]">
+            Last 14 Days vs. Previous 30 Days
+          </h2>
+          <span className="text-[11px] text-[#8E8E93]">
+            Recent 14-day average compared with prior 30-day baseline
+          </span>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+          {recentShift.map((item) => (
+            <div
+              key={item.key}
+              className="rounded-lg bg-[#1C1C1E]/65 border border-white/[0.06] px-3 py-2.5 space-y-1"
+            >
+              <div className="text-[11px] text-[#8E8E93] truncate">{item.label}</div>
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-sm font-mono font-semibold text-[#F5F5F7] whitespace-nowrap">
+                  {item.nNow > 0 ? item.nowFormatted : 'No logs yet'}
+                </span>
+                {item.deltaFormatted && (
+                  <span
+                    className={cn(
+                      'text-[11px] font-mono font-semibold px-1.5 py-0.5 rounded whitespace-nowrap',
+                      item.isFavourable === true
+                        ? 'bg-[#30D158]/15 text-[#30D158]'
+                        : item.isFavourable === false
+                          ? 'bg-[#FF453A]/15 text-[#FF453A]'
+                          : 'bg-[#141416] text-[#8E8E93]',
+                    )}
+                  >
+                    {item.deltaFormatted}
+                  </span>
+                )}
+              </div>
+              <div className="text-[10px] font-mono text-[#8E8E93] whitespace-nowrap">
+                Prior 30d: {item.nBefore > 0 ? item.beforeFormatted : 'No data'}
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Telemetry Coverage Strip */}
+      <section className="rounded-xl bg-[#141416] border border-white/[0.08] p-4 space-y-2.5">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-xs font-semibold uppercase tracking-wider text-[#F5F5F7]">
             Data Sources Connected
@@ -522,6 +806,7 @@ export function InsightsDashboard({
           {initialData.coverage.domains.map((domain) => (
             <div
               key={domain.key}
+              title={formatDayCountPhrase(domain.days)}
               className={cn(
                 'rounded-lg px-3 py-2 border flex items-center justify-between gap-2',
                 domain.status === 'active'
@@ -536,7 +821,7 @@ export function InsightsDashboard({
               </span>
               <span
                 className={cn(
-                  'text-xs font-mono tabular-nums font-semibold shrink-0',
+                  'text-xs font-mono font-semibold shrink-0 whitespace-nowrap',
                   domain.status === 'active'
                     ? 'text-[#30D158]'
                     : domain.status === 'warming'
@@ -544,47 +829,78 @@ export function InsightsDashboard({
                       : 'text-[#8E8E93]',
                 )}
               >
-                {domain.days}d
+                {`${domain.days}d`}
               </span>
             </div>
           ))}
         </div>
       </section>
 
-      {/* Section 2: Actionable Behavioural Drivers & Drains */}
-      <section className="rounded-xl bg-[#141416] border border-white/[0.08] p-5 space-y-4">
+      {/* Actionable Behavioural Drivers & Drains */}
+      <section className="rounded-xl bg-[#141416] border border-white/[0.08] p-4 sm:p-5 space-y-3.5">
         <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3">
           <div>
             <h2 className="text-sm font-semibold text-[#F5F5F7]">
               What Helps vs. What Drains Your Recovery
             </h2>
             <p className="text-xs text-[#8E8E93] mt-0.5">
-              Strongest day-to-day patterns across habits, screen time, spending, messaging, and environment.
+              Ranked by sample strength and confidence across your daily habits, screen time, spending, and environment.
             </p>
           </div>
 
-          <div className="inline-flex rounded-lg bg-[#1C1C1E] p-0.5 border border-white/[0.08] self-start">
-            {(
-              [
-                { key: 'behavioural', label: 'Habits & Choices' },
-                { key: 'environmental', label: 'Weather & Season' },
-                { key: 'all', label: 'All' },
-              ] as const
-            ).map((opt) => (
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Unique habits vs All variants */}
+            <div className="inline-flex rounded-lg bg-[#1C1C1E] p-0.5 border border-white/[0.08]">
               <button
-                key={opt.key}
                 type="button"
-                onClick={() => setScopeFilter(opt.key)}
+                onClick={() => setUniqueHabitsOnly(true)}
                 className={cn(
-                  'px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer',
-                  scopeFilter === opt.key
-                    ? 'bg-[#0A84FF] text-white'
+                  'px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer',
+                  uniqueHabitsOnly
+                    ? 'bg-[#141416] text-[#F5F5F7] border border-white/[0.1]'
                     : 'text-[#8E8E93] hover:text-[#F5F5F7]',
                 )}
               >
-                {opt.label}
+                Unique habits
               </button>
-            ))}
+              <button
+                type="button"
+                onClick={() => setUniqueHabitsOnly(false)}
+                className={cn(
+                  'px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer',
+                  !uniqueHabitsOnly
+                    ? 'bg-[#141416] text-[#F5F5F7] border border-white/[0.1]'
+                    : 'text-[#8E8E93] hover:text-[#F5F5F7]',
+                )}
+              >
+                All variants
+              </button>
+            </div>
+
+            {/* Scope Toggle */}
+            <div className="inline-flex rounded-lg bg-[#1C1C1E] p-0.5 border border-white/[0.08]">
+              {(
+                [
+                  { key: 'behavioural', label: 'Habits & Choices' },
+                  { key: 'environmental', label: 'Weather & Season' },
+                  { key: 'all', label: 'All' },
+                ] as const
+              ).map((opt) => (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => setScopeFilter(opt.key)}
+                  className={cn(
+                    'px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer',
+                    scopeFilter === opt.key
+                      ? 'bg-[#0A84FF] text-white'
+                      : 'text-[#8E8E93] hover:text-[#F5F5F7]',
+                  )}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -607,22 +923,22 @@ export function InsightsDashboard({
           ))}
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {/* Positive Drivers Column */}
-          <div className="space-y-3">
+          <div className="space-y-2.5">
             <div className="flex items-center justify-between border-b border-white/[0.08] pb-2">
               <span className="text-xs font-semibold uppercase tracking-wider text-[#30D158] flex items-center gap-1.5">
                 <TrendingUp className="w-3.5 h-3.5" />
                 Top Positive Drivers (Do More)
               </span>
-              <span className="text-[11px] font-mono tabular-nums text-[#8E8E93]">
+              <span className="text-[11px] font-mono text-[#8E8E93]">
                 {positiveDrivers.length} found
               </span>
             </div>
 
             {visiblePositiveDrivers.length === 0 ? (
               <div className="rounded-lg bg-[#1C1C1E]/50 border border-white/[0.06] p-4 text-xs text-[#8E8E93]">
-                No beneficial drivers matched this filter yet.
+                No positive habit claims passed sample-size guardrails for this filter yet.
               </div>
             ) : (
               <div className="space-y-2.5">
@@ -633,12 +949,22 @@ export function InsightsDashboard({
                     variant="positive"
                     showScopeTag={scopeFilter === 'all'}
                     showTechnicalStats={showTechnicalStats}
+                    onStartTrial={(d) =>
+                      openTrialFormWith(
+                        buildTrialDefaults({
+                          featureKey: d.featureKey,
+                          featureLabel: d.featureLabel,
+                          outcomeKey: d.outcomeKey,
+                          outcomeLabel: d.outcomeLabel,
+                        }),
+                      )
+                    }
                   />
                 ))}
               </div>
             )}
 
-            {positiveDrivers.length > 5 && (
+            {positiveDrivers.length > visiblePositiveDrivers.length || showAllPositive ? (
               <button
                 type="button"
                 onClick={() => setShowAllPositive((v) => !v)}
@@ -656,17 +982,17 @@ export function InsightsDashboard({
                   </>
                 )}
               </button>
-            )}
+            ) : null}
           </div>
 
           {/* Negative Drains Column */}
-          <div className="space-y-3">
+          <div className="space-y-2.5">
             <div className="flex items-center justify-between border-b border-white/[0.08] pb-2">
               <span className="text-xs font-semibold uppercase tracking-wider text-[#FF453A] flex items-center gap-1.5">
                 <TrendingDown className="w-3.5 h-3.5" />
                 Top Drains &amp; Suppressors (Reduce)
               </span>
-              <span className="text-[11px] font-mono tabular-nums text-[#8E8E93]">
+              <span className="text-[11px] font-mono text-[#8E8E93]">
                 {negativeDrivers.length} found
               </span>
             </div>
@@ -684,12 +1010,22 @@ export function InsightsDashboard({
                     variant="negative"
                     showScopeTag={scopeFilter === 'all'}
                     showTechnicalStats={showTechnicalStats}
+                    onStartTrial={(d) =>
+                      openTrialFormWith(
+                        buildTrialDefaults({
+                          featureKey: d.featureKey,
+                          featureLabel: d.featureLabel,
+                          outcomeKey: d.outcomeKey,
+                          outcomeLabel: d.outcomeLabel,
+                        }),
+                      )
+                    }
                   />
                 ))}
               </div>
             )}
 
-            {negativeDrivers.length > 5 && (
+            {negativeDrivers.length > visibleNegativeDrivers.length || showAllNegative ? (
               <button
                 type="button"
                 onClick={() => setShowAllNegative((v) => !v)}
@@ -707,13 +1043,13 @@ export function InsightsDashboard({
                   </>
                 )}
               </button>
-            )}
+            ) : null}
           </div>
         </div>
       </section>
 
-      {/* Section 3: Personal Operating Rules (Threshold Cliffs) */}
-      <section className="rounded-xl bg-[#141416] border border-white/[0.08] p-5 space-y-4">
+      {/* Personal Operating Rules (Threshold Cliffs) */}
+      <section className="rounded-xl bg-[#141416] border border-white/[0.08] p-4 sm:p-5 space-y-3.5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div>
             <h2 className="text-sm font-semibold text-[#F5F5F7]">
@@ -723,7 +1059,7 @@ export function InsightsDashboard({
               Clear day-to-day cutoff points where your recovery or sleep noticeably shifts.
             </p>
           </div>
-          <span className="text-xs font-mono tabular-nums text-[#8E8E93]">
+          <span className="text-xs font-mono text-[#8E8E93]">
             Showing {visibleCliffs.length} of {sortedCliffs.length} rules
           </span>
         </div>
@@ -733,7 +1069,7 @@ export function InsightsDashboard({
             No operating rules found for the selected filter.
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {visibleCliffs.map((cliff) => {
               const totalDays = cliff.lowN + cliff.highN;
               const impactColor =
@@ -746,9 +1082,8 @@ export function InsightsDashboard({
               return (
                 <div
                   key={cliff.id}
-                  className="rounded-lg bg-[#1C1C1E]/75 border border-white/[0.08] p-4 space-y-3"
+                  className="rounded-lg bg-[#1C1C1E]/75 border border-white/[0.08] p-3.5 space-y-2.5"
                 >
-                  {/* Top Line */}
                   <div className="flex items-start justify-between gap-2">
                     <div>
                       <div className="text-sm font-semibold text-[#F5F5F7]">
@@ -759,26 +1094,35 @@ export function InsightsDashboard({
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-[#141416] text-[#D1D1D6] border border-white/[0.08]">
+                    <div className="flex flex-wrap items-center justify-end gap-1 shrink-0">
+                      <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-[#141416] text-[#D1D1D6] border border-white/[0.08] whitespace-nowrap">
                         {cliff.timingLabel}
                       </span>
                       <span
                         className={cn(
-                          'text-[10px] font-medium px-2 py-0.5 rounded-full border',
+                          'text-[10px] font-medium px-2 py-0.5 rounded-full border whitespace-nowrap',
                           confidenceBadgeStyle(cliff.confidenceLabel),
                         )}
                       >
                         {cliff.confidenceLabel}
                       </span>
+                      {cliff.isEarlySample && (
+                        <span
+                          className={cn(
+                            'text-[10px] font-medium px-2 py-0.5 rounded-full border whitespace-nowrap',
+                            sampleStageBadgeStyle(cliff.sampleStage),
+                          )}
+                        >
+                          {cliff.sampleStage}
+                        </span>
+                      )}
                     </div>
                   </div>
 
-                  {/* Middle Highlight */}
                   <div className="space-y-1">
                     <div
                       className={cn(
-                        'text-lg font-mono tabular-nums font-semibold tracking-tight',
+                        'text-base font-mono font-semibold tracking-tight',
                         impactColor,
                       )}
                     >
@@ -788,37 +1132,62 @@ export function InsightsDashboard({
                       </span>
                     </div>
                     <p className="text-xs text-[#D1D1D6]">{cliff.plainVerdict}</p>
+                    {cliff.observationalCaveat && (
+                      <div className="rounded-md bg-[#FF9F0A]/10 border border-[#FF9F0A]/25 px-2.5 py-1.5 text-[11px] text-[#FF9F0A]">
+                        {cliff.observationalCaveat}
+                      </div>
+                    )}
                   </div>
 
-                  {/* Bottom Comparison Bar */}
                   <div className="grid grid-cols-2 gap-2 pt-2 border-t border-white/[0.06] text-xs">
-                    <div className="rounded bg-[#141416] px-3 py-2 border border-white/[0.06]">
+                    <div className="rounded bg-[#141416] px-2.5 py-1.5 border border-white/[0.06]">
                       <div className="text-[11px] text-[#8E8E93] truncate">
                         {cliff.lowBucketLabel}
                       </div>
-                      <div className="font-mono tabular-nums text-[#F5F5F7] font-semibold mt-0.5">
+                      <div className="font-mono text-[#F5F5F7] font-semibold mt-0.5 whitespace-nowrap">
                         {formatOutcomeValue(cliff.outcomeKey, cliff.lowMedian)}
                       </div>
                     </div>
-                    <div className="rounded bg-[#141416] px-3 py-2 border border-white/[0.06]">
+                    <div className="rounded bg-[#141416] px-2.5 py-1.5 border border-white/[0.06]">
                       <div className="text-[11px] text-[#8E8E93] truncate">
                         {cliff.highBucketLabel}
                       </div>
-                      <div className="font-mono tabular-nums text-[#F5F5F7] font-semibold mt-0.5">
+                      <div className="font-mono text-[#F5F5F7] font-semibold mt-0.5 whitespace-nowrap">
                         {formatOutcomeValue(cliff.outcomeKey, cliff.highMedian)}
                       </div>
                     </div>
                   </div>
 
                   <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-[#8E8E93]">
-                    <span className="font-mono tabular-nums">
-                      Based on {totalDays} days
+                    <span className="font-mono whitespace-nowrap">
+                      Based on {formatDayCountPhrase(totalDays)}
                     </span>
-                    {showTechnicalStats && (
-                      <span className="font-mono tabular-nums">
-                        p = {formatPValue(cliff.pValue)} · n = {cliff.lowN} vs {cliff.highN}
-                      </span>
-                    )}
+                    <div className="flex items-center gap-2.5">
+                      {showTechnicalStats && (
+                        <span className="font-mono whitespace-nowrap">
+                          p = {formatPValue(cliff.pValue)} · n = {cliff.lowN} vs {cliff.highN}
+                        </span>
+                      )}
+                      {cliff.scope === 'behavioural' && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            openTrialFormWith(
+                              buildTrialDefaults({
+                                featureKey: cliff.featureKey,
+                                featureLabel: cliff.featureLabel,
+                                outcomeKey: cliff.outcomeKey,
+                                outcomeLabel: cliff.outcomeLabel,
+                                comparisonLabel: cliff.comparisonLabel,
+                              }),
+                            )
+                          }
+                          className="px-2 py-0.5 rounded bg-[#0A84FF]/15 text-[#0A84FF] border border-[#0A84FF]/30 hover:bg-[#0A84FF]/25 text-[11px] font-medium whitespace-nowrap transition-colors cursor-pointer"
+                        >
+                          Start 14-Day Trial
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               );
@@ -826,7 +1195,7 @@ export function InsightsDashboard({
           </div>
         )}
 
-        {sortedCliffs.length > 6 && (
+        {(sortedCliffs.length > visibleCliffs.length || showAllCliffs) && (
           <div className="pt-1 flex justify-center">
             <button
               type="button"
@@ -841,8 +1210,8 @@ export function InsightsDashboard({
         )}
       </section>
 
-      {/* Section 4: Best 10% vs Worst 10% Days Fingerprint */}
-      <section className="rounded-xl bg-[#141416] border border-white/[0.08] p-5 space-y-4">
+      {/* Best 10% vs Worst 10% Days Fingerprint */}
+      <section className="rounded-xl bg-[#141416] border border-white/[0.08] p-4 sm:p-5 space-y-3.5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h2 className="text-sm font-semibold text-[#F5F5F7]">
@@ -882,24 +1251,26 @@ export function InsightsDashboard({
           <table className="w-full text-left border-collapse text-xs">
             <thead>
               <tr className="border-b border-white/[0.08] text-[11px] uppercase tracking-wider text-[#8E8E93]">
-                <th className="py-2.5 pr-4">Habit or Factor</th>
-                <th className="py-2.5 px-3">Type</th>
-                <th className="py-2.5 px-3 text-right">Best 10% Days</th>
-                <th className="py-2.5 px-3 text-right">Worst 10% Days</th>
-                <th className="py-2.5 px-3 text-right">Days Compared</th>
-                <th className="py-2.5 pl-3 text-right">Impact Size</th>
+                <th className="py-2 pr-4">Habit or Factor</th>
+                <th className="py-2 px-3">Type</th>
+                <th className="py-2 px-3 text-right whitespace-nowrap">Best 10% Days</th>
+                <th className="py-2 px-3 text-right whitespace-nowrap">Worst 10% Days</th>
+                <th className="py-2 px-3 text-right whitespace-nowrap">Days Compared</th>
+                <th className="py-2 pl-3 text-right whitespace-nowrap">Impact Size</th>
                 {showTechnicalStats && (
-                  <th className="py-2.5 pl-3 text-right font-mono">Cohen&apos;s d</th>
+                  <th className="py-2 pl-3 text-right font-mono whitespace-nowrap">
+                    Cohen&apos;s d
+                  </th>
                 )}
               </tr>
             </thead>
             <tbody className="divide-y divide-white/[0.06]">
               {filteredContrasts.slice(0, 18).map((c) => (
                 <tr key={c.id} className="hover:bg-[#1C1C1E]/50 transition-colors">
-                  <td className="py-2.5 pr-4 font-medium text-[#F5F5F7]">
+                  <td className="py-2 pr-4 font-medium text-[#F5F5F7]">
                     {c.featureLabel}
                   </td>
-                  <td className="py-2.5 px-3">
+                  <td className="py-2 px-3 whitespace-nowrap">
                     <span
                       className={cn(
                         'text-[10px] font-medium px-2 py-0.5 rounded-full border',
@@ -911,16 +1282,16 @@ export function InsightsDashboard({
                       {contrastScopeBadge(c.scope)}
                     </span>
                   </td>
-                  <td className="py-2.5 px-3 text-right font-mono tabular-nums text-[#30D158]">
+                  <td className="py-2 px-3 text-right font-mono text-[#30D158] whitespace-nowrap">
                     {c.best10Formatted}
                   </td>
-                  <td className="py-2.5 px-3 text-right font-mono tabular-nums text-[#FF9F0A]">
+                  <td className="py-2 px-3 text-right font-mono text-[#FF9F0A] whitespace-nowrap">
                     {c.worst10Formatted}
                   </td>
-                  <td className="py-2.5 px-3 text-right font-mono tabular-nums text-[#8E8E93]">
-                    {c.sampleN} days
+                  <td className="py-2 px-3 text-right font-mono text-[#8E8E93] whitespace-nowrap">
+                    {formatDayCountPhrase(c.sampleN)}
                   </td>
-                  <td className="py-2.5 pl-3 text-right">
+                  <td className="py-2 pl-3 text-right whitespace-nowrap">
                     <span
                       className={cn(
                         'inline-block text-[10px] font-medium px-2 py-0.5 rounded-full border',
@@ -931,7 +1302,7 @@ export function InsightsDashboard({
                     </span>
                   </td>
                   {showTechnicalStats && (
-                    <td className="py-2.5 pl-3 text-right font-mono tabular-nums font-semibold text-[#D1D1D6]">
+                    <td className="py-2 pl-3 text-right font-mono font-semibold text-[#D1D1D6] whitespace-nowrap">
                       {formatSigned(c.effectSizeD, 3)}
                     </td>
                   )}
@@ -942,8 +1313,11 @@ export function InsightsDashboard({
         </div>
       </section>
 
-      {/* Section 5: N-of-1 Self-Experiments */}
-      <section className="rounded-xl bg-[#141416] border border-white/[0.08] p-5 space-y-4">
+      {/* Personal 14-Day Experiments */}
+      <section
+        id="experiments-section"
+        className="rounded-xl bg-[#141416] border border-white/[0.08] p-4 sm:p-5 space-y-3.5"
+      >
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
@@ -1118,7 +1492,7 @@ export function InsightsDashboard({
                   required
                   value={expBaselineDays}
                   onChange={(e) => setExpBaselineDays(Number(e.target.value) || 21)}
-                  className="w-full rounded-lg bg-[#141416] border border-white/[0.12] px-3 py-2 text-xs font-mono tabular-nums text-[#F5F5F7] focus:outline-none focus:border-[#0A84FF]"
+                  className="w-full rounded-lg bg-[#141416] border border-white/[0.12] px-3 py-2 text-xs font-mono text-[#F5F5F7] focus:outline-none focus:border-[#0A84FF]"
                 />
               </div>
             </div>
@@ -1144,12 +1518,12 @@ export function InsightsDashboard({
         )}
 
         {initialData.experiments.length === 0 ? (
-          <div className="rounded-lg bg-[#1C1C1E]/50 border border-white/[0.06] p-6 text-center space-y-1.5">
+          <div className="rounded-lg bg-[#1C1C1E]/50 border border-white/[0.06] p-5 text-center space-y-1.5">
             <p className="text-xs font-medium text-[#F5F5F7]">
               No Experiments Running Yet
             </p>
             <p className="text-xs text-[#8E8E93]">
-              Tap &ldquo;New Experiment&rdquo; above to launch a 14-day test on a controllable habit.
+              Tap &ldquo;Start 14-Day Trial&rdquo; on any rule above or &ldquo;New Experiment&rdquo; to begin testing a habit.
             </p>
           </div>
         ) : (
@@ -1177,8 +1551,8 @@ export function InsightsDashboard({
                       {exp.status}
                     </span>
                   </div>
-                  <div className="text-[11px] font-mono tabular-nums text-[#8E8E93]">
-                    {exp.startDay} to {exp.endDay} ({exp.baselineDays}d baseline)
+                  <div className="text-[11px] font-mono text-[#8E8E93]">
+                    {exp.startDay} to {exp.endDay} ({formatDayCountPhrase(exp.baselineDays)} baseline)
                   </div>
                 </div>
 

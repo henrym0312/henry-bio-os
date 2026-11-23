@@ -2,21 +2,30 @@ export type FeatureScope = 'behavioural' | 'environmental';
 export type BeneficialDirection = 'beneficial' | 'detrimental';
 export type StrengthBand = 'Strong' | 'Moderate' | 'Mild';
 export type ConfidenceLabel = 'High Confidence' | 'Moderate Confidence' | 'Early Signal';
+export type SampleStageLabel = 'Established' | 'Building' | 'Early (<45d)';
 export type EffectSizeLabel = 'Very Large' | 'Large' | 'Moderate';
 
-type FeatureValueKind = 'duration_mins' | 'gbp' | 'int' | 'decimal1' | 'boolean_rate';
+type FeatureValueKind =
+  | 'duration_mins'
+  | 'hours'
+  | 'gbp'
+  | 'int'
+  | 'decimal1'
+  | 'boolean_rate';
 
 interface OutcomeMeta {
   label: string;
   unit: string;
+  singularUnit?: string;
   higherIsBetter: boolean;
 }
 
 interface FeatureMeta {
   label: string;
+  singularUnit?: string;
   unit: string;
   valueKind: FeatureValueKind;
-  dedupeGroup?: string;
+  family: string;
 }
 
 const ENVIRONMENTAL_FEATURES = new Set<string>([
@@ -33,22 +42,49 @@ const ENVIRONMENTAL_FEATURES = new Set<string>([
   'is_weekend',
 ]);
 
+export const SCREEN_TIME_FEATURES = new Set<string>([
+  'mac_mins',
+  'iphone_mins',
+  'combined_screen_mins',
+  'wall_clock_screen_mins',
+  'late_night_screen_mins',
+  'social_screen_mins',
+  'video_screen_mins',
+  'dev_productivity_mins',
+  'context_switches',
+  'micro_checks',
+  'deep_work_mins',
+]);
+
+export const SUPPLEMENT_FEATURES = new Set<string>([
+  'am_pills_taken',
+  'pm_pills_taken',
+  'creatine_mg',
+  'ginkgo_mg',
+  'ashwagandha_mg',
+  'vitamin_d_ug',
+  'magnesium_citrate_mg',
+]);
+
+export const OBSERVATIONAL_SUPPLEMENT_CAVEAT =
+  'Linked in observational data; test via a 14-day experiment before changing routine.';
+
 export const OUTCOME_META: Record<string, OutcomeMeta> = {
   hrv_avg_ms: { label: 'HRV (Recovery)', unit: 'ms', higherIsBetter: true },
   lowest_hr_bpm: { label: 'Resting Heart Rate', unit: 'bpm', higherIsBetter: false },
-  deep_sleep_min: { label: 'Deep Sleep', unit: 'mins', higherIsBetter: true },
-  rem_sleep_min: { label: 'REM Sleep', unit: 'mins', higherIsBetter: true },
-  total_sleep_min: { label: 'Total Sleep', unit: 'mins', higherIsBetter: true },
+  deep_sleep_min: { label: 'Deep Sleep', unit: 'mins', singularUnit: 'min', higherIsBetter: true },
+  rem_sleep_min: { label: 'REM Sleep', unit: 'mins', singularUnit: 'min', higherIsBetter: true },
+  total_sleep_min: { label: 'Total Sleep', unit: 'mins', singularUnit: 'min', higherIsBetter: true },
   sleep_efficiency_pct: { label: 'Sleep Efficiency', unit: '%', higherIsBetter: true },
-  sleep_latency_min: { label: 'Time to Fall Asleep', unit: 'mins', higherIsBetter: false },
-  readiness_score: { label: 'Readiness Score', unit: 'pts', higherIsBetter: true },
-  sleep_score: { label: 'Sleep Score', unit: 'pts', higherIsBetter: true },
+  sleep_latency_min: { label: 'Time to Fall Asleep', unit: 'mins', singularUnit: 'min', higherIsBetter: false },
+  readiness_score: { label: 'Readiness Score', unit: 'pts', singularUnit: 'pt', higherIsBetter: true },
+  sleep_score: { label: 'Sleep Score', unit: 'pts', singularUnit: 'pt', higherIsBetter: true },
   mental_focus: { label: 'Mental Focus', unit: '/10', higherIsBetter: true },
   energy: { label: 'Physical Energy', unit: '/10', higherIsBetter: true },
   mood_calm: { label: 'Mood & Calm', unit: '/10', higherIsBetter: true },
   physical_soreness: { label: 'Physical Soreness', unit: '/10', higherIsBetter: false },
   task_completion_rate: { label: 'Task Completion', unit: '%', higherIsBetter: true },
-  tasks_remaining: { label: 'Unfinished Tasks', unit: 'tasks', higherIsBetter: false },
+  tasks_remaining: { label: 'Unfinished Tasks', unit: 'tasks', singularUnit: 'task', higherIsBetter: false },
 };
 
 export const OUTCOME_UNITS: Record<string, string> = Object.fromEntries(
@@ -56,89 +92,102 @@ export const OUTCOME_UNITS: Record<string, string> = Object.fromEntries(
 );
 
 export const FEATURE_META: Record<string, FeatureMeta> = {
-  imessages_total: { label: 'Total iMessages', unit: 'msgs', valueKind: 'int', dedupeGroup: 'imessages' },
-  imessages_sent: { label: 'iMessages Sent', unit: 'msgs', valueKind: 'int', dedupeGroup: 'imessages' },
-  imessages_received: { label: 'iMessages Received', unit: 'msgs', valueKind: 'int', dedupeGroup: 'imessages' },
-  late_comms_count: { label: 'Messages After 9pm', unit: 'msgs', valueKind: 'int' },
-  emails_total: { label: 'Total Emails', unit: 'emails', valueKind: 'int', dedupeGroup: 'emails' },
-  emails_received_uni: { label: 'Uni Emails Received', unit: 'emails', valueKind: 'int', dedupeGroup: 'emails' },
-  emails_sent_uni: { label: 'Uni Emails Sent', unit: 'emails', valueKind: 'int', dedupeGroup: 'emails' },
-  emails_received_gmail: { label: 'Gmail Received', unit: 'emails', valueKind: 'int', dedupeGroup: 'emails' },
-  emails_sent_gmail: { label: 'Gmail Sent', unit: 'emails', valueKind: 'int', dedupeGroup: 'emails' },
-  mac_mins: { label: 'Mac Screen Time', unit: 'mins', valueKind: 'duration_mins' },
-  iphone_mins: { label: 'iPhone Screen Time', unit: 'mins', valueKind: 'duration_mins' },
-  combined_screen_mins: { label: 'Total Screen Time', unit: 'mins', valueKind: 'duration_mins' },
-  wall_clock_screen_mins: { label: 'Active Screen Window', unit: 'mins', valueKind: 'duration_mins' },
-  late_night_screen_mins: { label: 'Late-Night Screen Time', unit: 'mins', valueKind: 'duration_mins' },
-  deep_work_mins: { label: 'Deep Work Time', unit: 'mins', valueKind: 'duration_mins' },
-  social_screen_mins: { label: 'Social Media Time', unit: 'mins', valueKind: 'duration_mins' },
-  video_screen_mins: { label: 'Video Time', unit: 'mins', valueKind: 'duration_mins' },
-  dev_productivity_mins: { label: 'Productivity Time', unit: 'mins', valueKind: 'duration_mins' },
-  context_switches: { label: 'App Switches', unit: 'switches', valueKind: 'int' },
-  micro_checks: { label: 'Quick Phone Checks', unit: 'checks', valueKind: 'int' },
-  am_pills_taken: { label: 'AM Supplements', unit: '', valueKind: 'boolean_rate' },
-  pm_pills_taken: { label: 'PM Supplements', unit: '', valueKind: 'boolean_rate' },
-  creatine_mg: { label: 'Daily Creatine', unit: 'mg', valueKind: 'int' },
-  ginkgo_mg: { label: 'Daily Ginkgo', unit: 'mg', valueKind: 'int' },
-  ashwagandha_mg: { label: 'Daily Ashwagandha', unit: 'mg', valueKind: 'int' },
-  vitamin_d_ug: { label: 'Daily Vitamin D', unit: 'ug', valueKind: 'int' },
-  magnesium_citrate_mg: { label: 'Evening Magnesium', unit: 'mg', valueKind: 'int' },
-  caffeine_total_mg: { label: 'Daily Caffeine', unit: 'mg', valueKind: 'int' },
-  last_caffeine_hour: { label: 'Last Caffeine Time', unit: 'hr', valueKind: 'decimal1' },
-  bedtime_caffeine_mg: { label: 'Caffeine Left at Bedtime', unit: 'mg', valueKind: 'int' },
-  alcohol_units: { label: 'Alcohol Units', unit: 'units', valueKind: 'decimal1' },
-  last_alcohol_hour: { label: 'Last Drink Time', unit: 'hr', valueKind: 'decimal1' },
-  spend_total_gbp: { label: 'Daily Spending', unit: 'GBP', valueKind: 'gbp' },
-  spend_takeaway_gbp: { label: 'Takeaway Spending', unit: 'GBP', valueKind: 'gbp' },
-  spend_groceries_gbp: { label: 'Grocery Spending', unit: 'GBP', valueKind: 'gbp' },
-  spend_social_pubs_gbp: { label: 'Pub & Social Spending', unit: 'GBP', valueKind: 'gbp' },
-  spend_coffee_gbp: { label: 'Coffee Shop Spending', unit: 'GBP', valueKind: 'gbp' },
-  tx_count: { label: 'Card Transactions', unit: 'txs', valueKind: 'int' },
-  late_spend_count: { label: 'Late-Night Purchases', unit: 'txs', valueKind: 'int' },
-  photoperiod_hours: { label: 'Daylight Hours', unit: 'hrs', valueKind: 'decimal1' },
-  pressure_hpa: { label: 'Air Pressure', unit: '', valueKind: 'int' },
-  pressure_delta_24h: { label: '24h Air Pressure Drop/Rise', unit: '', valueKind: 'decimal1' },
-  temp_mean_c: { label: 'Outdoor Temperature', unit: 'C', valueKind: 'decimal1' },
-  humidity_pct: { label: 'Outdoor Humidity', unit: '%', valueKind: 'int' },
-  cloud_cover_pct: { label: 'Cloud Cover', unit: '%', valueKind: 'int' },
-  precipitation_mm: { label: 'Rainfall', unit: 'mm', valueKind: 'decimal1' },
-  uv_max: { label: 'Peak UV Index', unit: 'UV', valueKind: 'decimal1' },
-  european_aqi: { label: 'Air Quality Index', unit: 'AQI', valueKind: 'int' },
-  pm25: { label: 'Air Pollution (PM2.5)', unit: 'PM2.5', valueKind: 'decimal1' },
-  is_weekend: { label: 'Weekend vs Weekday', unit: '', valueKind: 'boolean_rate' },
-  recovery_high_mins: { label: 'Oura Restorative Time', unit: 'mins', valueKind: 'duration_mins' },
-  stress_high_mins: { label: 'Oura High Stress Time', unit: 'mins', valueKind: 'duration_mins' },
-  active_calories: { label: 'Active Calories', unit: 'kcal', valueKind: 'int' },
-  steps: { label: 'Daily Steps', unit: 'steps', valueKind: 'int' },
-  headphone_audio_avg_db: { label: 'Headphone Volume', unit: 'dB', valueKind: 'decimal1' },
-  headphone_audio_mins: { label: 'Headphone Listening Time', unit: 'mins', valueKind: 'duration_mins' },
-  env_audio_avg_db: { label: 'Ambient Noise Level', unit: 'dB', valueKind: 'decimal1' },
-  env_audio_max_db: { label: 'Peak Ambient Noise', unit: 'dB', valueKind: 'decimal1' },
-  time_in_daylight_mins: { label: 'Time Outside in Daylight', unit: 'mins', valueKind: 'duration_mins' },
-  body_mass_kg: { label: 'Body Weight', unit: 'kg', valueKind: 'decimal1' },
-  workout_mins: { label: 'Exercise Time', unit: 'mins', valueKind: 'duration_mins' },
-  hours_at_home: { label: 'Hours at Home', unit: 'hrs', valueKind: 'decimal1' },
-  drive_mins: { label: 'Driving Time', unit: 'mins', valueKind: 'duration_mins' },
-  drive_trips: { label: 'Driving Trips', unit: 'trips', valueKind: 'int' },
-  is_away_sleep: { label: 'Sleeping Away From Home', unit: '', valueKind: 'boolean_rate' },
-  tv_active_mins: { label: 'TV Watch Time', unit: 'mins', valueKind: 'duration_mins' },
-  tv_late_mins: { label: 'Late-Night TV Time', unit: 'mins', valueKind: 'duration_mins' },
-  audio_playback_mins: { label: 'Audio Listening Time', unit: 'mins', valueKind: 'duration_mins' },
-  music_mins: { label: 'Music Listening Time', unit: 'mins', valueKind: 'duration_mins' },
-  video_mins: { label: 'Video Watching Time', unit: 'mins', valueKind: 'duration_mins' },
-  bedtime_audio_used: { label: 'Audio Used Before Sleep', unit: '', valueKind: 'boolean_rate' },
-  adhd_med_doses: { label: 'ADHD Med Doses', unit: 'doses', valueKind: 'decimal1' },
-  adhd_total_mg: { label: 'Daily ADHD Medication', unit: 'mg', valueKind: 'int' },
-  last_adhd_med_hour: { label: 'Last ADHD Dose Hour', unit: 'hr', valueKind: 'decimal1' },
-  social_bandwidth: { label: 'Social Level', unit: '/3', valueKind: 'decimal1' },
-  task_completion_rate: { label: 'Task Completion', unit: '%', valueKind: 'int' },
-  tasks_remaining: { label: 'Unfinished Tasks', unit: 'tasks', valueKind: 'int' },
+  imessages_total: { label: 'Total iMessages', singularUnit: 'msg', unit: 'msgs', valueKind: 'int', family: 'imessages' },
+  imessages_sent: { label: 'iMessages Sent', singularUnit: 'msg', unit: 'msgs', valueKind: 'int', family: 'imessages' },
+  imessages_received: { label: 'iMessages Received', singularUnit: 'msg', unit: 'msgs', valueKind: 'int', family: 'imessages' },
+  late_comms_count: { label: 'Messages After 9pm', singularUnit: 'msg', unit: 'msgs', valueKind: 'int', family: 'late_comms' },
+  emails_total: { label: 'Total Emails', singularUnit: 'email', unit: 'emails', valueKind: 'int', family: 'emails' },
+  emails_received_uni: { label: 'Uni Emails Received', singularUnit: 'email', unit: 'emails', valueKind: 'int', family: 'emails' },
+  emails_sent_uni: { label: 'Uni Emails Sent', singularUnit: 'email', unit: 'emails', valueKind: 'int', family: 'emails' },
+  emails_received_gmail: { label: 'Gmail Received', singularUnit: 'email', unit: 'emails', valueKind: 'int', family: 'emails' },
+  emails_sent_gmail: { label: 'Gmail Sent', singularUnit: 'email', unit: 'emails', valueKind: 'int', family: 'emails' },
+  mac_mins: { label: 'Mac Screen Time', singularUnit: 'min', unit: 'mins', valueKind: 'duration_mins', family: 'screen_total' },
+  iphone_mins: { label: 'iPhone Screen Time', singularUnit: 'min', unit: 'mins', valueKind: 'duration_mins', family: 'screen_total' },
+  combined_screen_mins: { label: 'Total Screen Time', singularUnit: 'min', unit: 'mins', valueKind: 'duration_mins', family: 'screen_total' },
+  wall_clock_screen_mins: { label: 'Active Screen Window', singularUnit: 'min', unit: 'mins', valueKind: 'duration_mins', family: 'screen_total' },
+  late_night_screen_mins: { label: 'Late-Night Screen Time', singularUnit: 'min', unit: 'mins', valueKind: 'duration_mins', family: 'late_screen' },
+  deep_work_mins: { label: 'Deep Work Time', singularUnit: 'min', unit: 'mins', valueKind: 'duration_mins', family: 'screen_cat' },
+  social_screen_mins: { label: 'Social Media Time', singularUnit: 'min', unit: 'mins', valueKind: 'duration_mins', family: 'screen_cat' },
+  video_screen_mins: { label: 'Video Time', singularUnit: 'min', unit: 'mins', valueKind: 'duration_mins', family: 'screen_cat' },
+  dev_productivity_mins: { label: 'Productivity Time', singularUnit: 'min', unit: 'mins', valueKind: 'duration_mins', family: 'screen_cat' },
+  context_switches: { label: 'App Switches', singularUnit: 'switch', unit: 'switches', valueKind: 'int', family: 'screen_cat' },
+  micro_checks: { label: 'Quick Phone Checks', singularUnit: 'check', unit: 'checks', valueKind: 'int', family: 'screen_cat' },
+  am_pills_taken: { label: 'AM Supplements', unit: '', valueKind: 'boolean_rate', family: 'supplements' },
+  pm_pills_taken: { label: 'PM Supplements', unit: '', valueKind: 'boolean_rate', family: 'supplements' },
+  creatine_mg: { label: 'Daily Creatine', unit: 'mg', valueKind: 'int', family: 'supplements' },
+  ginkgo_mg: { label: 'Daily Ginkgo', unit: 'mg', valueKind: 'int', family: 'supplements' },
+  ashwagandha_mg: { label: 'Daily Ashwagandha', unit: 'mg', valueKind: 'int', family: 'supplements' },
+  vitamin_d_ug: { label: 'Daily Vitamin D', unit: 'ug', valueKind: 'int', family: 'supplements' },
+  magnesium_citrate_mg: { label: 'Evening Magnesium', unit: 'mg', valueKind: 'int', family: 'supplements' },
+  caffeine_total_mg: { label: 'Daily Caffeine', unit: 'mg', valueKind: 'int', family: 'caffeine' },
+  last_caffeine_hour: { label: 'Last Caffeine Time', singularUnit: 'hr', unit: 'hrs', valueKind: 'hours', family: 'caffeine' },
+  bedtime_caffeine_mg: { label: 'Caffeine Left at Bedtime', unit: 'mg', valueKind: 'int', family: 'caffeine' },
+  alcohol_units: { label: 'Alcohol Units', singularUnit: 'unit', unit: 'units', valueKind: 'decimal1', family: 'alcohol' },
+  last_alcohol_hour: { label: 'Last Drink Time', singularUnit: 'hr', unit: 'hrs', valueKind: 'hours', family: 'alcohol' },
+  spend_total_gbp: { label: 'Daily Spending', unit: 'GBP', valueKind: 'gbp', family: 'spending' },
+  spend_takeaway_gbp: { label: 'Takeaway Spending', unit: 'GBP', valueKind: 'gbp', family: 'spending' },
+  spend_groceries_gbp: { label: 'Grocery Spending', unit: 'GBP', valueKind: 'gbp', family: 'spending' },
+  spend_social_pubs_gbp: { label: 'Pub & Social Spending', unit: 'GBP', valueKind: 'gbp', family: 'spending' },
+  spend_coffee_gbp: { label: 'Coffee Shop Spending', unit: 'GBP', valueKind: 'gbp', family: 'spending' },
+  tx_count: { label: 'Card Transactions', singularUnit: 'tx', unit: 'txs', valueKind: 'int', family: 'spending' },
+  late_spend_count: { label: 'Late-Night Purchases', singularUnit: 'tx', unit: 'txs', valueKind: 'int', family: 'spending' },
+  photoperiod_hours: { label: 'Daylight Hours', singularUnit: 'hr', unit: 'hrs', valueKind: 'hours', family: 'photoperiod' },
+  pressure_hpa: { label: 'Air Pressure', unit: '', valueKind: 'int', family: 'pressure' },
+  pressure_delta_24h: { label: '24h Air Pressure Drop/Rise', unit: '', valueKind: 'decimal1', family: 'pressure' },
+  temp_mean_c: { label: 'Outdoor Temperature', unit: 'C', valueKind: 'decimal1', family: 'temp' },
+  humidity_pct: { label: 'Outdoor Humidity', unit: '%', valueKind: 'int', family: 'humidity' },
+  cloud_cover_pct: { label: 'Cloud Cover', unit: '%', valueKind: 'int', family: 'cloud' },
+  precipitation_mm: { label: 'Rainfall', unit: 'mm', valueKind: 'decimal1', family: 'rainfall' },
+  uv_max: { label: 'Peak UV Index', unit: 'UV', valueKind: 'decimal1', family: 'uv' },
+  european_aqi: { label: 'Air Quality Index', unit: 'AQI', valueKind: 'int', family: 'aqi' },
+  pm25: { label: 'Air Pollution (PM2.5)', unit: 'PM2.5', valueKind: 'decimal1', family: 'aqi' },
+  is_weekend: { label: 'Weekend vs Weekday', unit: '', valueKind: 'boolean_rate', family: 'weekend' },
+  recovery_high_mins: { label: 'Oura Restorative Time', singularUnit: 'min', unit: 'mins', valueKind: 'duration_mins', family: 'oura_stress_recovery' },
+  stress_high_mins: { label: 'Oura High Stress Time', singularUnit: 'min', unit: 'mins', valueKind: 'duration_mins', family: 'oura_stress_recovery' },
+  active_calories: { label: 'Active Calories', unit: 'kcal', valueKind: 'int', family: 'steps_calories' },
+  steps: { label: 'Daily Steps', singularUnit: 'step', unit: 'steps', valueKind: 'int', family: 'steps_calories' },
+  workout_mins: { label: 'Exercise Time', singularUnit: 'min', unit: 'mins', valueKind: 'duration_mins', family: 'steps_calories' },
+  headphone_audio_avg_db: { label: 'Headphone Volume', unit: 'dB', valueKind: 'decimal1', family: 'audio' },
+  headphone_audio_mins: { label: 'Headphone Listening Time', singularUnit: 'min', unit: 'mins', valueKind: 'duration_mins', family: 'audio' },
+  env_audio_avg_db: { label: 'Ambient Noise Level', unit: 'dB', valueKind: 'decimal1', family: 'audio' },
+  env_audio_max_db: { label: 'Peak Ambient Noise', unit: 'dB', valueKind: 'decimal1', family: 'audio' },
+  time_in_daylight_mins: { label: 'Time Outside in Daylight', singularUnit: 'min', unit: 'mins', valueKind: 'duration_mins', family: 'daylight' },
+  body_mass_kg: { label: 'Body Weight', unit: 'kg', valueKind: 'decimal1', family: 'body' },
+  hours_at_home: { label: 'Hours at Home', singularUnit: 'hr', unit: 'hrs', valueKind: 'hours', family: 'presence' },
+  drive_mins: { label: 'Driving Time', singularUnit: 'min', unit: 'mins', valueKind: 'duration_mins', family: 'presence' },
+  drive_trips: { label: 'Driving Trips', singularUnit: 'trip', unit: 'trips', valueKind: 'int', family: 'presence' },
+  is_away_sleep: { label: 'Sleeping Away From Home', unit: '', valueKind: 'boolean_rate', family: 'presence' },
+  tv_active_mins: { label: 'TV Watch Time', singularUnit: 'min', unit: 'mins', valueKind: 'duration_mins', family: 'media' },
+  tv_late_mins: { label: 'Late-Night TV Time', singularUnit: 'min', unit: 'mins', valueKind: 'duration_mins', family: 'media' },
+  audio_playback_mins: { label: 'Audio Listening Time', singularUnit: 'min', unit: 'mins', valueKind: 'duration_mins', family: 'media' },
+  music_mins: { label: 'Music Listening Time', singularUnit: 'min', unit: 'mins', valueKind: 'duration_mins', family: 'media' },
+  video_mins: { label: 'Video Watching Time', singularUnit: 'min', unit: 'mins', valueKind: 'duration_mins', family: 'media' },
+  bedtime_audio_used: { label: 'Audio Used Before Sleep', unit: '', valueKind: 'boolean_rate', family: 'media' },
+  adhd_med_doses: { label: 'ADHD Med Doses', singularUnit: 'dose', unit: 'doses', valueKind: 'decimal1', family: 'meds' },
+  adhd_total_mg: { label: 'Daily ADHD Medication', unit: 'mg', valueKind: 'int', family: 'meds' },
+  last_adhd_med_hour: { label: 'Last ADHD Dose Hour', singularUnit: 'hr', unit: 'hrs', valueKind: 'hours', family: 'meds' },
+  social_bandwidth: { label: 'Social Level', unit: '/3', valueKind: 'decimal1', family: 'subjective' },
+  task_completion_rate: { label: 'Task Completion', unit: '%', valueKind: 'int', family: 'tasks' },
+  tasks_remaining: { label: 'Unfinished Tasks', singularUnit: 'task', unit: 'tasks', valueKind: 'int', family: 'tasks' },
 };
 
 function titleCaseFallback(rawKey: string): string {
   return rawKey
     .replace(/_/g, ' ')
     .replace(/\b\w/g, (ch) => ch.toUpperCase());
+}
+
+export function pluraliseUnit(
+  value: number,
+  singular: string,
+  plural: string,
+): string {
+  return Math.abs(Math.abs(value) - 1) < 0.05 ? singular : plural;
+}
+
+export function formatDayCountPhrase(days: number): string {
+  const rounded = Math.round(days);
+  return `${rounded} ${rounded === 1 ? 'day' : 'days'}`;
 }
 
 export function getOutcomeLabel(outcomeKey: string, fallback?: string): string {
@@ -161,8 +210,8 @@ export function getFeatureLabel(featureKey: string, fallback?: string): string {
   return titleCaseFallback(featureKey);
 }
 
-export function getFeatureDedupeGroup(featureKey: string): string {
-  return FEATURE_META[featureKey]?.dedupeGroup ?? featureKey;
+export function getFeatureFamily(featureKey: string): string {
+  return FEATURE_META[featureKey]?.family ?? featureKey;
 }
 
 export function classifyFeatureScope(featureKey: string): FeatureScope {
@@ -180,9 +229,19 @@ export function getBeneficialDirection(
   return spearmanR >= 0 ? 'beneficial' : 'detrimental';
 }
 
-export function getStrengthBand(spearmanR: number): StrengthBand {
+export function getSampleStageLabel(sampleN: number): SampleStageLabel {
+  if (sampleN >= 60) return 'Established';
+  if (sampleN < 45) return 'Early (<45d)';
+  return 'Building';
+}
+
+export function getStrengthBand(
+  spearmanR: number,
+  sampleN = 60,
+): StrengthBand {
   const absR = Math.abs(spearmanR);
-  if (absR >= 0.45) return 'Strong';
+  if (sampleN < 25) return 'Mild';
+  if (absR >= 0.45 && sampleN >= 45) return 'Strong';
   if (absR >= 0.3) return 'Moderate';
   return 'Mild';
 }
@@ -190,14 +249,36 @@ export function getStrengthBand(spearmanR: number): StrengthBand {
 export function getConfidenceLabel(
   pValue: number,
   fdrQValue: number | null,
+  sampleN: number,
 ): ConfidenceLabel {
-  if ((fdrQValue !== null && fdrQValue < 0.01) || pValue < 0.001) {
+  if (
+    sampleN >= 60 &&
+    ((fdrQValue !== null && fdrQValue < 0.01) || pValue < 0.0005)
+  ) {
     return 'High Confidence';
   }
-  if (pValue < 0.05) {
+  if (sampleN >= 25 && pValue < 0.05) {
     return 'Moderate Confidence';
   }
   return 'Early Signal';
+}
+
+export function isPositiveHabitEligible(input: {
+  featureKey: string;
+  outcomeKey: string;
+  sampleN: number;
+  marginalEffect: number | null;
+  beneficialDirection: BeneficialDirection;
+}): boolean {
+  if (input.beneficialDirection !== 'beneficial') return false;
+  if (!SCREEN_TIME_FEATURES.has(input.featureKey)) return true;
+
+  if (input.sampleN < 45 || input.marginalEffect === null) {
+    return false;
+  }
+  return isOutcomeHigherBetter(input.outcomeKey)
+    ? input.marginalEffect > 0
+    : input.marginalEffect < 0;
 }
 
 export function getLagLabel(lagDays: number): string {
@@ -216,7 +297,7 @@ export function getEffectSizeLabel(effectSizeD: number): EffectSizeLabel {
 export function formatMinutesHm(totalMins: number): string {
   const rounded = Math.round(totalMins);
   if (Math.abs(rounded) < 60) {
-    return `${rounded} mins`;
+    return `${rounded} ${pluraliseUnit(rounded, 'min', 'mins')}`;
   }
   const sign = rounded < 0 ? '-' : '';
   const abs = Math.abs(rounded);
@@ -240,6 +321,11 @@ export function formatFeatureValue(featureKey: string, value: number): string {
   if (meta.valueKind === 'duration_mins') {
     return formatMinutesHm(value);
   }
+  if (meta.valueKind === 'hours') {
+    const numStr = value.toFixed(1);
+    const unit = pluraliseUnit(Number(numStr), meta.singularUnit ?? 'hr', meta.unit);
+    return `${numStr} ${unit}`;
+  }
   if (meta.valueKind === 'gbp') {
     return `£${value.toFixed(2)}`;
   }
@@ -248,49 +334,93 @@ export function formatFeatureValue(featureKey: string, value: number): string {
   }
   if (meta.valueKind === 'int') {
     const rounded = Math.round(value);
-    return meta.unit ? `${rounded} ${meta.unit}` : String(rounded);
+    if (!meta.unit) return String(rounded);
+    const unit = meta.singularUnit
+      ? pluraliseUnit(rounded, meta.singularUnit, meta.unit)
+      : meta.unit;
+    return `${rounded} ${unit}`;
   }
   const formatted = formatMetricNumber(value, 1);
-  return meta.unit ? `${formatted} ${meta.unit}` : formatted;
+  if (!meta.unit) return formatted;
+  const numVal = Number(formatted);
+  const unit = meta.singularUnit
+    ? pluraliseUnit(numVal, meta.singularUnit, meta.unit)
+    : meta.unit;
+  return `${formatted} ${unit}`;
 }
 
 export function formatOutcomeValue(outcomeKey: string, value: number): string {
-  const unit = getOutcomeUnit(outcomeKey);
+  const meta = OUTCOME_META[outcomeKey];
   const numStr = formatMetricNumber(value, 1);
+  const unit = meta?.unit ?? '';
+  if (!unit) return numStr;
   if (unit === '%' || unit === '/10') {
     return `${numStr}${unit}`;
   }
-  return unit ? `${numStr} ${unit}` : numStr;
+  const resolvedUnit = meta?.singularUnit
+    ? pluraliseUnit(Number(numStr), meta.singularUnit, unit)
+    : unit;
+  return `${numStr} ${resolvedUnit}`;
 }
 
 export function formatOutcomeDelta(outcomeKey: string, delta: number): string {
-  const unit = getOutcomeUnit(outcomeKey);
+  const meta = OUTCOME_META[outcomeKey];
+  const absNum = Number(formatMetricNumber(Math.abs(delta), 1));
   const numStr = formatMetricNumber(Math.abs(delta), 1);
   const sign = delta > 0 ? '+' : delta < 0 ? '-' : '';
+  const unit = meta?.unit ?? '';
+  if (!unit) return `${sign}${numStr}`;
   if (unit === '%' || unit === '/10') {
     return `${sign}${numStr}${unit}`;
   }
-  return unit ? `${sign}${numStr} ${unit}` : `${sign}${numStr}`;
+  const resolvedUnit = meta?.singularUnit
+    ? pluraliseUnit(absNum, meta.singularUnit, unit)
+    : unit;
+  return `${sign}${numStr} ${resolvedUnit}`;
 }
 
-export function buildDriverTakeaway(
-  featureLabel: string,
-  outcomeKey: string,
-  outcomeLabel: string,
-  spearmanR: number,
-  lagDays: number,
-): string {
+export function buildDriverTakeaway(input: {
+  featureKey: string;
+  featureLabel: string;
+  outcomeKey: string;
+  outcomeLabel: string;
+  spearmanR: number;
+  lagDays: number;
+  sampleN: number;
+  beneficialDirection: BeneficialDirection;
+}): {
+  takeawayText: string;
+  observationalCaveat: string | null;
+} {
   const timing =
-    lagDays === 0
+    input.lagDays === 0
       ? 'on the same day'
-      : lagDays === 1
+      : input.lagDays === 1
         ? 'next day'
-        : `${lagDays} days later`;
-  const effectDirection = spearmanR >= 0 ? 'higher' : 'lower';
-  if (outcomeKey === 'lowest_hr_bpm') {
-    return `Higher ${featureLabel} is linked to ${effectDirection} ${outcomeLabel} ${timing}.`;
+        : `${input.lagDays} days later`;
+  const effectDirection = input.spearmanR >= 0 ? 'higher' : 'lower';
+
+  let base =
+    input.outcomeKey === 'lowest_hr_bpm'
+      ? `Higher ${input.featureLabel} is linked to ${effectDirection} ${input.outcomeLabel} ${timing}.`
+      : `Higher ${input.featureLabel} is linked to ${effectDirection} ${timing} ${input.outcomeLabel}.`;
+
+  if (input.sampleN < 45) {
+    base = `${base} Early sample (<45 days); treat as preliminary.`;
   }
-  return `Higher ${featureLabel} is linked to ${effectDirection} ${timing} ${outcomeLabel}.`;
+
+  let observationalCaveat: string | null = null;
+  if (
+    SUPPLEMENT_FEATURES.has(input.featureKey) &&
+    input.beneficialDirection === 'detrimental'
+  ) {
+    observationalCaveat = OBSERVATIONAL_SUPPLEMENT_CAVEAT;
+  }
+
+  return {
+    takeawayText: base,
+    observationalCaveat,
+  };
 }
 
 export function translateCliffFields(input: {
@@ -304,6 +434,8 @@ export function translateCliffFields(input: {
   lowMedian: number;
   highMedian: number;
   medianDelta: number;
+  totalSampleN: number;
+  isBeneficialDelta: boolean;
 }) {
   const isPrior = input.thresholdRule.includes('prior_day');
   const timingLabel = isPrior ? 'Day before' : 'Same day';
@@ -372,13 +504,57 @@ export function translateCliffFields(input: {
     plainVerdict = `${prefix}${input.outcomeLabel} ${verb} ${absText} (${lowFormatted} -> ${highFormatted})`;
   }
 
+  if (input.totalSampleN < 45) {
+    plainVerdict = `${plainVerdict}. Early sample (<45 days).`;
+  }
+
+  const observationalCaveat =
+    SUPPLEMENT_FEATURES.has(input.featureKey) && !input.isBeneficialDelta
+      ? OBSERVATIONAL_SUPPLEMENT_CAVEAT
+      : null;
+
   return {
     timingLabel,
     lowBucketLabel: lowLabel,
     highBucketLabel: highLabel,
     comparisonLabel,
     plainVerdict,
+    observationalCaveat,
   };
+}
+
+export function selectHighlightDrivers(
+  drivers: AnalyticsDriverItem[],
+  limit: number,
+  uniqueHabitsOnly = true,
+): AnalyticsDriverItem[] {
+  const confidenceRank = (label: ConfidenceLabel): number => {
+    if (label === 'High Confidence') return 0;
+    if (label === 'Moderate Confidence') return 1;
+    return 2;
+  };
+
+  const ranked = [...drivers].sort((a, b) => {
+    const rankDiff = confidenceRank(a.confidenceLabel) - confidenceRank(b.confidenceLabel);
+    if (rankDiff !== 0) return rankDiff;
+    const pDiff = a.pValue - b.pValue;
+    if (Math.abs(pDiff) > 1e-9) return pDiff;
+    return Math.abs(b.spearmanR) - Math.abs(a.spearmanR);
+  });
+
+  if (!uniqueHabitsOnly) {
+    return ranked.slice(0, limit);
+  }
+
+  const picked: AnalyticsDriverItem[] = [];
+  const seenFamilies = new Set<string>();
+  for (const item of ranked) {
+    if (seenFamilies.has(item.dedupeGroup)) continue;
+    seenFamilies.add(item.dedupeGroup);
+    picked.push(item);
+    if (picked.length >= limit) break;
+  }
+  return picked;
 }
 
 export interface AnalyticsDriverItem {
@@ -394,6 +570,9 @@ export interface AnalyticsDriverItem {
   lagDays: number;
   lagLabel: string;
   sampleN: number;
+  sampleStage: SampleStageLabel;
+  isEarlySample: boolean;
+  isPositiveEligible: boolean;
   spearmanR: number;
   pValue: number;
   fdrQValue: number | null;
@@ -404,6 +583,7 @@ export interface AnalyticsDriverItem {
   strengthLabel: StrengthBand;
   confidenceLabel: ConfidenceLabel;
   takeawayText: string;
+  observationalCaveat: string | null;
   confidenceTier: string;
 }
 
@@ -420,6 +600,9 @@ export interface AnalyticsCliffItem {
   timingLabel: string;
   comparisonLabel: string;
   plainVerdict: string;
+  observationalCaveat: string | null;
+  sampleStage: SampleStageLabel;
+  isEarlySample: boolean;
   confidenceLabel: ConfidenceLabel;
   isBeneficialDelta: boolean;
   lowBucketLabel: string;
@@ -446,6 +629,8 @@ export interface AnalyticsContrastItem {
   effectSizeD: number;
   effectSizeLabel: EffectSizeLabel;
   sampleN: number;
+  sampleStage: SampleStageLabel;
+  isEarlySample: boolean;
 }
 
 export interface DomainCoverageItem {
@@ -453,6 +638,33 @@ export interface DomainCoverageItem {
   label: string;
   days: number;
   status: 'active' | 'warming' | 'pending';
+}
+
+export interface TodayScoreboard {
+  day: string;
+  lateCommsCount: number | null;
+  bedtimeCaffeineMg: number;
+  todayCaffeineMg: number;
+  spendTotalGbp: number | null;
+  spendSocialPubsGbp: number | null;
+  amPillsTaken: boolean | null;
+  pmPillsTaken: boolean | null;
+  checkInLogged: boolean;
+}
+
+export interface RecentShiftItem {
+  key: string;
+  label: string;
+  unit: string;
+  meanBefore: number | null;
+  nBefore: number;
+  meanNow: number | null;
+  nNow: number;
+  delta: number | null;
+  beforeFormatted: string;
+  nowFormatted: string;
+  deltaFormatted: string | null;
+  isFavourable: boolean | null;
 }
 
 export interface ExperimentItem {
@@ -484,6 +696,8 @@ export interface InsightsPayload {
     maxDay: string | null;
     domains: DomainCoverageItem[];
   };
+  todayScoreboard: TodayScoreboard;
+  recentShift: RecentShiftItem[];
   drivers: AnalyticsDriverItem[];
   thresholdCliffs: AnalyticsCliffItem[];
   groupContrasts: AnalyticsContrastItem[];
