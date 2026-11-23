@@ -23,8 +23,8 @@ const subjectivePayloadSchema = z
     mental_focus: slider1To10.optional(),
     moodCalm: slider1To10.optional(),
     mood_calm: slider1To10.optional(),
-    physicalSoreness: slider1To10.optional(),
-    physical_soreness: slider1To10.optional(),
+    physicalSoreness: slider1To10.nullable().optional(),
+    physical_soreness: slider1To10.nullable().optional(),
     socialBandwidth: z.number().int().min(0).max(3).optional(),
     social_bandwidth: z.number().int().min(0).max(3).optional(),
     eventTags: z.array(z.string().trim().min(1)).optional(),
@@ -36,9 +36,6 @@ const subjectivePayloadSchema = z
   })
   .refine((v) => (v.moodCalm ?? v.mood_calm) !== undefined, {
     message: 'moodCalm (1-10) is required',
-  })
-  .refine((v) => (v.physicalSoreness ?? v.physical_soreness) !== undefined, {
-    message: 'physicalSoreness (1-10) is required',
   })
   .refine((v) => (v.socialBandwidth ?? v.social_bandwidth) !== undefined, {
     message: 'socialBandwidth (0-3) is required',
@@ -59,6 +56,7 @@ export async function POST(req: Request) {
   const d = parsed.data;
   const now = new Date();
   const day = d.day ?? toLondonDay(now);
+  const physicalSoreness = d.physicalSoreness ?? d.physical_soreness ?? null;
 
   try {
     const db = getDb();
@@ -69,7 +67,7 @@ export async function POST(req: Request) {
         energy: d.energy,
         mentalFocus: (d.mentalFocus ?? d.mental_focus)!,
         moodCalm: (d.moodCalm ?? d.mood_calm)!,
-        physicalSoreness: (d.physicalSoreness ?? d.physical_soreness)!,
+        physicalSoreness,
         socialBandwidth: (d.socialBandwidth ?? d.social_bandwidth)!,
         eventTags: d.eventTags ?? d.event_tags ?? [],
         notes: d.notes?.trim() || null,

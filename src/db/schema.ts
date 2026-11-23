@@ -634,7 +634,7 @@ export const lifeSubjectiveDaily = pgTable('life_subjective_daily', {
   energy: integer('energy').notNull(),
   mentalFocus: integer('mental_focus').notNull(),
   moodCalm: integer('mood_calm').notNull(),
-  physicalSoreness: integer('physical_soreness').notNull(),
+  physicalSoreness: integer('physical_soreness'),
   socialBandwidth: integer('social_bandwidth').notNull(),
   eventTags: jsonb('event_tags').$type<string[]>().default([]).notNull(),
   notes: text('notes'),

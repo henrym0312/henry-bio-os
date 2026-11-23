@@ -40,6 +40,8 @@ const haeSampleSchema = z
     date: z.string().optional(),
     start: z.string().optional(),
     end: z.string().optional(),
+    startDate: z.string().optional(),
+    endDate: z.string().optional(),
     qty: z.number().finite().optional(),
     avg: z.number().finite().optional(),
     max: z.number().finite().optional(),
@@ -61,6 +63,8 @@ const haeWorkoutSchema = z
   .object({
     start: z.string().optional(),
     end: z.string().optional(),
+    startDate: z.string().optional(),
+    endDate: z.string().optional(),
     duration: z.number().finite().optional(),
     units: z.string().optional(),
     name: z.string().optional(),
@@ -86,8 +90,12 @@ interface DayHealthAccumulator {
   hpMins: number | null;
   daylightMins: number | null;
   latestMassKg: { ts: number; kg: number } | null;
-  workoutMins: number | null;
+  latestBmi: { ts: number; bmi: number } | null;
+  exerciseMins: number | null;
+  workoutSessionMins: number | null;
   metricNames: Set<string>;
+  metricUnits: Record<string, string>;
+  sampleCounts: Record<string, number>;
 }
 
 function getOrInitDay(
@@ -103,12 +111,31 @@ function getOrInitDay(
       hpMins: null,
       daylightMins: null,
       latestMassKg: null,
-      workoutMins: null,
+      latestBmi: null,
+      exerciseMins: null,
+      workoutSessionMins: null,
       metricNames: new Set(),
+      metricUnits: {},
+      sampleCounts: {},
     };
     map.set(day, acc);
   }
   return acc;
+}
+
+function normalizeMetricName(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+function maxNullable(a: number | null, b: number | null): number | null {
+  if (a === null && b === null) return null;
+  if (a === null) return b;
+  if (b === null) return a;
+  return Math.max(a, b);
 }
 
 function durationToMinutes(value: number, units?: string, defaultUnit: 's' | 'min' = 'min'): number {
@@ -116,10 +143,10 @@ function durationToMinutes(value: number, units?: string, defaultUnit: 's' | 'mi
   if (u === 's' || u === 'sec' || u === 'secs' || u === 'second' || u === 'seconds') {
     return value / 60;
   }
-  if (u === 'hr' || u === 'hrs' || u === 'hour' || u === 'hours') {
+  if (u === 'hr' || u === 'hrs' || u === 'hour' || u === 'hours' || u === 'h') {
     return value * 60;
   }
-  if (u === 'min' || u === 'mins' || u === 'minute' || u === 'minutes') {
+  if (u === 'min' || u === 'mins' || u === 'minute' || u === 'minutes' || u === 'm') {
     return value;
   }
   return defaultUnit === 's' ? value / 60 : value;
@@ -129,6 +156,9 @@ function massToKg(value: number, units?: string): number {
   const u = (units ?? '').trim().toLowerCase();
   if (u === 'lb' || u === 'lbs' || u === 'pound' || u === 'pounds') {
     return value * 0.45359237;
+  }
+  if (u === 'st' || u === 'stone' || u === 'stones') {
+    return value * 6.35029318;
   }
   if (u === 'g' || u === 'gram' || u === 'grams') {
     return value / 1000;
@@ -144,6 +174,19 @@ function mean(nums: number[]): number | null {
   if (nums.length === 0) return null;
   return round2(nums.reduce((a, b) => a + b, 0) / nums.length);
 }
+
+const SUPPORTED_METRICS = new Set([
+  'environmental_audio_exposure',
+  'headphone_audio_exposure',
+  'time_in_daylight',
+  'weight_body_mass',
+  'weight',
+  'body_mass',
+  'apple_exercise_time',
+  'exercise_time',
+  'body_mass_index',
+  'bmi',
+]);
 
 export async function POST(req: Request) {
   const gate = await authenticateAndParseJson(req);
@@ -172,24 +215,25 @@ export async function POST(req: Request) {
     const workouts = haeParsed.data.data.workouts ?? [];
 
     for (const metric of metrics) {
-      const name = metric.name.trim().toLowerCase();
-      const supported = new Set([
-        'environmental_audio_exposure',
-        'headphone_audio_exposure',
-        'time_in_daylight',
-        'weight_body_mass',
-      ]);
-      if (!supported.has(name)) {
+      const name = normalizeMetricName(metric.name);
+      if (!SUPPORTED_METRICS.has(name)) {
         ignoredMetrics.push(metric.name);
         continue;
       }
 
       for (const sample of metric.data) {
-        const dt = parseFlexibleTimestamp(sample.date ?? sample.start);
+        const dt = parseFlexibleTimestamp(
+          sample.date ?? sample.start ?? sample.startDate,
+        );
         if (!dt) continue;
         const day = toLondonDay(dt);
         const acc = getOrInitDay(byDay, day);
         acc.metricNames.add(name);
+        acc.sampleCounts[name] = (acc.sampleCounts[name] ?? 0) + 1;
+        const unitStr = (sample.units ?? metric.units ?? '').trim();
+        if (unitStr) {
+          acc.metricUnits[name] = unitStr;
+        }
 
         if (name === 'environmental_audio_exposure') {
           const avgVal = sample.avg ?? sample.qty;
@@ -199,8 +243,8 @@ export async function POST(req: Request) {
         } else if (name === 'headphone_audio_exposure') {
           const avgVal = sample.avg ?? sample.qty;
           if (typeof avgVal === 'number') acc.hpAvgSamples.push(avgVal);
-          const startDt = parseFlexibleTimestamp(sample.start);
-          const endDt = parseFlexibleTimestamp(sample.end);
+          const startDt = parseFlexibleTimestamp(sample.start ?? sample.startDate);
+          const endDt = parseFlexibleTimestamp(sample.end ?? sample.endDate);
           if (startDt && endDt && endDt > startDt) {
             acc.hpMins = (acc.hpMins ?? 0) + (endDt.getTime() - startDt.getTime()) / 60_000;
           } else if (typeof sample.duration === 'number' && sample.duration > 0) {
@@ -209,26 +253,46 @@ export async function POST(req: Request) {
               durationToMinutes(sample.duration, sample.units ?? metric.units, 's');
           }
         } else if (name === 'time_in_daylight') {
-          if (typeof sample.qty === 'number' && sample.qty >= 0) {
+          const val = sample.qty ?? sample.duration;
+          if (typeof val === 'number' && val >= 0) {
             acc.daylightMins =
               (acc.daylightMins ?? 0) +
-              durationToMinutes(sample.qty, sample.units ?? metric.units, 'min');
+              durationToMinutes(val, sample.units ?? metric.units, 'min');
           }
-        } else if (name === 'weight_body_mass') {
-          if (typeof sample.qty === 'number' && sample.qty > 0) {
-            const kg = massToKg(sample.qty, sample.units ?? metric.units);
+        } else if (
+          name === 'weight_body_mass' ||
+          name === 'weight' ||
+          name === 'body_mass'
+        ) {
+          const val = sample.qty ?? sample.avg;
+          if (typeof val === 'number' && val > 0) {
+            const kg = massToKg(val, sample.units ?? metric.units);
             if (!acc.latestMassKg || dt.getTime() >= acc.latestMassKg.ts) {
               acc.latestMassKg = { ts: dt.getTime(), kg };
             }
+          }
+        } else if (name === 'body_mass_index' || name === 'bmi') {
+          const val = sample.qty ?? sample.avg;
+          if (typeof val === 'number' && val > 0) {
+            if (!acc.latestBmi || dt.getTime() >= acc.latestBmi.ts) {
+              acc.latestBmi = { ts: dt.getTime(), bmi: val };
+            }
+          }
+        } else if (name === 'apple_exercise_time' || name === 'exercise_time') {
+          const val = sample.qty ?? sample.duration ?? sample.avg;
+          if (typeof val === 'number' && val >= 0) {
+            acc.exerciseMins =
+              (acc.exerciseMins ?? 0) +
+              durationToMinutes(val, sample.units ?? metric.units, 'min');
           }
         }
       }
     }
 
     for (const workout of workouts) {
-      const startDt = parseFlexibleTimestamp(workout.start);
+      const startDt = parseFlexibleTimestamp(workout.start ?? workout.startDate);
       if (!startDt) continue;
-      const endDt = parseFlexibleTimestamp(workout.end);
+      const endDt = parseFlexibleTimestamp(workout.end ?? workout.endDate);
       let mins: number | null = null;
       if (endDt && endDt > startDt) {
         mins = (endDt.getTime() - startDt.getTime()) / 60_000;
@@ -240,10 +304,12 @@ export async function POST(req: Request) {
       const day = toLondonDay(startDt);
       const acc = getOrInitDay(byDay, day);
       acc.metricNames.add('workouts');
-      acc.workoutMins = (acc.workoutMins ?? 0) + mins;
+      acc.sampleCounts.workouts = (acc.sampleCounts.workouts ?? 0) + 1;
+      acc.workoutSessionMins = (acc.workoutSessionMins ?? 0) + mins;
     }
 
     for (const [day, acc] of Array.from(byDay.entries()).sort(([a], [b]) => a.localeCompare(b))) {
+      const combinedWorkoutMins = maxNullable(acc.workoutSessionMins, acc.exerciseMins);
       rowsToUpsert.push({
         day,
         envAudioAvgDb: mean(acc.envAvgSamples),
@@ -252,10 +318,18 @@ export async function POST(req: Request) {
         headphoneAudioMins: acc.hpMins !== null ? round2(acc.hpMins) : null,
         timeInDaylightMins: acc.daylightMins !== null ? round2(acc.daylightMins) : null,
         bodyMassKg: acc.latestMassKg ? round2(acc.latestMassKg.kg) : null,
-        workoutMins: acc.workoutMins !== null ? round2(acc.workoutMins) : null,
+        workoutMins: combinedWorkoutMins !== null ? round2(combinedWorkoutMins) : null,
         rawPayload: {
           source: 'health_auto_export',
           metricsSeen: Array.from(acc.metricNames),
+          metricUnits: acc.metricUnits,
+          sampleCounts: acc.sampleCounts,
+          metricsSummary: {
+            bodyMassIndex: acc.latestBmi ? round2(acc.latestBmi.bmi) : null,
+            appleExerciseMins: acc.exerciseMins !== null ? round2(acc.exerciseMins) : null,
+            workoutSessionMins:
+              acc.workoutSessionMins !== null ? round2(acc.workoutSessionMins) : null,
+          },
           ignoredMetrics,
         },
         updatedAt: now,
@@ -311,7 +385,11 @@ export async function POST(req: Request) {
           headphoneAudioMins: sql`COALESCE(excluded.headphone_audio_mins, ${lifeAcousticHealthDaily.headphoneAudioMins})`,
           timeInDaylightMins: sql`COALESCE(excluded.time_in_daylight_mins, ${lifeAcousticHealthDaily.timeInDaylightMins})`,
           bodyMassKg: sql`COALESCE(excluded.body_mass_kg, ${lifeAcousticHealthDaily.bodyMassKg})`,
-          workoutMins: sql`COALESCE(excluded.workout_mins, ${lifeAcousticHealthDaily.workoutMins})`,
+          workoutMins: sql`CASE
+            WHEN excluded.workout_mins IS NULL THEN ${lifeAcousticHealthDaily.workoutMins}
+            WHEN ${lifeAcousticHealthDaily.workoutMins} IS NULL THEN excluded.workout_mins
+            ELSE GREATEST(excluded.workout_mins, ${lifeAcousticHealthDaily.workoutMins})
+          END`,
           rawPayload: sql`${lifeAcousticHealthDaily.rawPayload} || excluded.raw_payload`,
           updatedAt: sql`excluded.updated_at`,
         },
