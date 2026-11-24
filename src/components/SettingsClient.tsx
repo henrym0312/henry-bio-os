@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useEffect, useRef, useState, useTransition } from 'react';
 import {
   CheckCircle2,
   Database,
@@ -17,6 +17,26 @@ import {
 } from '@/app/actions';
 import { ALL_OURA_ENDPOINTS, type OuraEndpointKey } from '@/lib/oura/types';
 import { cn } from '@/lib/utils';
+
+const CORE_HISTORY_ENDPOINTS: OuraEndpointKey[] = [
+  'personal_info',
+  'ring_configuration',
+  'daily_readiness',
+  'daily_sleep',
+  'sleep',
+  'sleep_time',
+  'daily_activity',
+  'daily_stress',
+  'daily_resilience',
+  'daily_spo2',
+  'daily_cardiovascular_age',
+  'vo2_max',
+  'workout',
+  'session',
+  'enhanced_tag',
+  'tag',
+  'rest_mode_period',
+];
 
 export interface SettingsInitialData {
   dbReady: boolean;
@@ -74,6 +94,29 @@ export function SettingsClient({
     type: 'success' | 'error';
     message: string;
   } | null>(null);
+  const autoBackfillTriggeredRef = useRef(false);
+
+  useEffect(() => {
+    if (oauthStatusParam !== 'connected' || autoBackfillTriggeredRef.current) {
+      return;
+    }
+    autoBackfillTriggeredRef.current = true;
+    startBackfill(async () => {
+      const res = await triggerBackfillAction({
+        startDate,
+        endDate,
+        endpoints: CORE_HISTORY_ENDPOINTS,
+      });
+      if (res.ok) {
+        setActionBanner({
+          type: 'success',
+          message: `2-year Oura historical backfill finished (${res.result.startDate} to ${res.result.endDate}). Total records restored: ${res.result.totalRecords}.`,
+        });
+      } else {
+        setActionBanner({ type: 'error', message: res.error });
+      }
+    });
+  }, [oauthStatusParam, startDate, endDate]);
 
   const handleBackfill = () => {
     setActionBanner(null);

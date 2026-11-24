@@ -154,9 +154,12 @@ export async function POST(req: NextRequest) {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    if (message.includes('Oura OAuth tokens are not configured')) {
+    if (
+      message.includes('Oura OAuth tokens are not configured') ||
+      message.includes('Oura token refresh failed (400)')
+    ) {
       return NextResponse.json(
-        { ok: false, skipped: 'oauth_not_configured', error: message },
+        { ok: false, skipped: 'oauth_reauth_required', error: message },
         { status: 202 },
       );
     }

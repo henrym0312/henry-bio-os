@@ -1,28 +1,13 @@
+import { eq } from 'drizzle-orm';
 import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
+import { getDb } from '@/db';
+import { ouraOauthTokens } from '@/db/schema';
 import { getAppUrl } from '@/lib/env';
 import { exchangeOuraAuthCode } from '@/lib/oura/client';
-import { recordSyncLog, runBackfill } from '@/lib/oura/sync';
-import type { OuraEndpointKey } from '@/lib/oura/types';
+import { recordSyncLog } from '@/lib/oura/sync';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 300;
-
-const INITIAL_SYNC_ENDPOINTS: OuraEndpointKey[] = [
-  'personal_info',
-  'ring_configuration',
-  'daily_readiness',
-  'daily_sleep',
-  'sleep',
-  'sleep_time',
-  'daily_activity',
-  'daily_stress',
-  'daily_resilience',
-  'daily_spo2',
-  'daily_cardiovascular_age',
-  'vo2_max',
-  'workout',
-];
 
 export async function GET(req: NextRequest) {
   const appUrl = getAppUrl();
@@ -52,6 +37,21 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    const db = getDb();
+    const [existing] = await db
+      .select()
+      .from(ouraOauthTokens)
+      .where(eq(ouraOauthTokens.id, 1))
+      .limit(1);
+
+    // Guard against duplicate browser/prefetch GET requests re-submitting a single-use
+    // Oura authorisation code (which causes Oura to revoke the newly minted token).
+    if (existing && Date.now() - existing.updatedAt.getTime() < 60_000) {
+      const response = NextResponse.redirect(`${appUrl}/settings?oauth=connected`);
+      response.cookies.delete('oura_oauth_state');
+      return response;
+    }
+
     const redirectUri = `${appUrl}/api/oura/callback`;
     await exchangeOuraAuthCode(code, redirectUri);
 
@@ -62,19 +62,6 @@ export async function GET(req: NextRequest) {
       statusCode: 200,
       recordsProcessed: 1,
     });
-
-    const now = new Date();
-    const endDate = now.toISOString().slice(0, 10);
-    const start = new Date(now);
-    start.setUTCDate(start.getUTCDate() - 120);
-    const startDate = start.toISOString().slice(0, 10);
-
-    await runBackfill({
-      startDate,
-      endDate,
-      endpoints: INITIAL_SYNC_ENDPOINTS,
-      source: 'oauth_initial_sync',
-    }).catch(() => undefined);
 
     const response = NextResponse.redirect(`${appUrl}/settings?oauth=connected`);
     response.cookies.delete('oura_oauth_state');
